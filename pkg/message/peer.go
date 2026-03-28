@@ -2,7 +2,7 @@ package message
 
 import (
 	"crypto/md5"
-	"fmt"
+	"encoding/hex"
 	"net"
 
 	"github.com/golang/glog"
@@ -59,7 +59,8 @@ func (p *producer) producePeerMessage(op int, msg bmp.Message) {
 		m.LocalIP = peerUpMsg.GetLocalAddressString()
 		// Saving local bgp speaker identities.
 		p.speakerIP = m.LocalIP
-		p.speakerHash = fmt.Sprintf("%x", md5.Sum([]byte(p.speakerIP)))
+		sh := md5.Sum([]byte(p.speakerIP))
+		p.speakerHash = hex.EncodeToString(sh[:])
 		m.RouterIP = p.speakerIP
 		m.RouterHash = p.speakerHash
 
