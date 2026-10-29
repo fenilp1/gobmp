@@ -63,6 +63,7 @@ func (p *producer) processMPReach(attribute []byte, ph *bmp.PerPeerHeader, updat
 	}
 	reachableUpdate := copyUpdate(update)
 	if reach, ok := nlri.(*bgp.MPReachNLRI); ok {
+		reach.MultiLabel = p.multiLabelState(ph.GetTableKey(), reach.GetAFISAFIType())
 		validateNHC(reachableUpdate, reach.AddressFamilyID, reach.SubAddressFamilyID, reach.NextHopAddress, ph)
 	}
 	p.processMPUpdate(nlri, AddPrefix, ph, reachableUpdate)

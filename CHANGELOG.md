@@ -4,6 +4,10 @@ Message updates and major project changes should be documented here.
 
 ## [Unreleased]
 
+#### Changed
+
+- L3VPN and BGP CT announcements whose label field is 0x000000 or 0x800000 now publish that label (0 or 524288) per RFC 8277 §2.2 instead of no label, so these routes get new hashes
+
 ### 2026-03-01
 
 #### Added

@@ -73,7 +73,8 @@ func (p *producer) producePeerMessage(op int, msg bmp.Message, peerID bmp.PeerId
 		// Per RFC 7911: AddPath capability is per BGP session (not global)
 		p.tableLock.Lock()
 		ptp := PerTableProperties{
-			addPathCapable: make(map[int]bool),
+			addPathCapable:    make(map[int]bool),
+			multiLabelCapable: make(map[int]bool),
 		}
 
 		// Check AddPath capability for this specific peer/table
@@ -85,6 +86,15 @@ func (p *producer) producePeerMessage(op int, msg bmp.Message, peerID bmp.PeerId
 						ptp.addPathCapable[k] = capable
 					}
 				}
+			}
+		}
+
+		// RFC 8277 §2.3: multiple labels are used for an AFI/SAFI only when
+		// both OPEN messages carry the Multiple Labels Capability for it
+		rMultiLabel := peerUpMsg.ReceivedOpen.MultiLabelCapability()
+		for k, capable := range peerUpMsg.SentOpen.MultiLabelCapability() {
+			if capable && rMultiLabel[k] {
+				ptp.multiLabelCapable[k] = true
 			}
 		}
 

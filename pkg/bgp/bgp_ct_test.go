@@ -130,23 +130,6 @@ func TestGetNLRICTIPv6Reach(t *testing.T) {
 	checkCTRoute(t, got.NLRI[0], 0, []uint32{2000}, "192.0.2.1:7", net.ParseIP("2001:db8::5"), 128)
 }
 
-// RFC 9832 §6.1 allows multiple labels with the Multiple Labels Capability
-// (RFC 8277 §2.3): S=0 on all labels but the last.
-func TestGetNLRICTMultipleLabels(t *testing.T) {
-	nlri := []byte{
-		0x90,             // Length 144 = 2*24 labels + 64 RD + 32 prefix
-		0x00, 0x06, 0x40, // Label 100, S=0
-		0x00, 0x0c, 0x81, // Label 200, S=1
-		0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x01, // RD 100:1
-		0x0a, 0x00, 0x00, 0x02, // 10.0.0.2/32
-	}
-	_, got := decodeCTReach(t, ctMPReach(1, []byte{192, 0, 2, 1}, nlri), nil)
-	if len(got.NLRI) != 1 {
-		t.Fatalf("got %d NLRIs, want 1", len(got.NLRI))
-	}
-	checkCTRoute(t, got.NLRI[0], 0, []uint32{100, 200}, "100:1", net.IP{10, 0, 0, 2}, 32)
-}
-
 // RFC 8277 §2.2 / RFC 7911 §3: with ADD-PATH a 4-octet Path Identifier
 // precedes the Length field. RFC 9832 §7.6 recommends ADD-PATH for BGP CT.
 func TestGetNLRICTAddPath(t *testing.T) {

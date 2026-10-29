@@ -31,8 +31,11 @@ type MPReachNLRI struct {
 	NLRI                 []byte
 	// When BGP update carries Prefix SID attribute 40, the processing of some AFI/SAFI NLRIs
 	// may differ from the standard processing.
-	SRv6    bool
-	addPath map[int]bool
+	SRv6 bool
+	// MultiLabel is the session's RFC 8277 Multiple Labels Capability state
+	// for this AFI/SAFI; it selects how VPN NLRI label stacks are read.
+	MultiLabel l3vpn.MultiLabel
+	addPath    map[int]bool
 }
 
 // GetAFISAFIType returns underlaying NLRI's type based on AFI/SAFI
@@ -154,7 +157,12 @@ func (mp *MPReachNLRI) GetNLRI73() (*srpolicy.NLRI73, error) {
 func (mp *MPReachNLRI) GetNLRIL3VPN() (*base.MPNLRI, error) {
 	if (mp.AddressFamilyID == 1 || mp.AddressFamilyID == 2) && mp.SubAddressFamilyID == 128 {
 		pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
-		nlri, err := l3vpn.UnmarshalL3VPNNLRI(mp.NLRI, pathID, mp.SRv6)
+		nlri, err := l3vpn.UnmarshalL3VPNNLRI(mp.NLRI, l3vpn.Options{
+			PathID:     pathID,
+			SRv6:       mp.SRv6,
+			MultiLabel: mp.MultiLabel,
+			IPv6:       mp.AddressFamilyID == 2,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -182,7 +190,11 @@ func (mp *MPReachNLRI) GetNLRICT() (*base.MPNLRI, error) {
 		return nil, fmt.Errorf("invalid BGP CT next hop length %d (RFC 9832 §6.2)", mp.NextHopAddressLength)
 	}
 	pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
-	return l3vpn.UnmarshalL3VPNNLRI(mp.NLRI, pathID)
+	return l3vpn.UnmarshalL3VPNNLRI(mp.NLRI, l3vpn.Options{
+		PathID:     pathID,
+		MultiLabel: mp.MultiLabel,
+		IPv6:       mp.AddressFamilyID == 2,
+	})
 }
 
 // GetNLRIEVPN check for presence of NLRI EVPN AFI 25 and SAFI 70 in the NLRI 14 NLRI data and if exists, instantiate EVPN object

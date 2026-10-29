@@ -78,6 +78,34 @@ func (o *OpenMessage) AddPathCapability() map[int]bool {
 	return m
 }
 
+// MultiLabelCapability returns a map of NLRI types and bool indicating if the
+// Multiple Labels Capability (code 8, RFC 8277 §2.1) lists a particular NLRI
+// type with a Count of at least 2. Only the first copy of the capability and
+// the first triple per AFI/SAFI are significant, triples with Count 0 or 1
+// are ignored, and a capability whose length is not a multiple of four is
+// malformed and ignored.
+func (o *OpenMessage) MultiLabelCapability() map[int]bool {
+	m := make(map[int]bool)
+	v, ok := o.Capabilities[8]
+	if !ok || len(v) == 0 {
+		return m
+	}
+	tlv := v[0]
+	if len(tlv.Value)%4 != 0 {
+		glog.Errorf("malformed Multiple Labels capability of length %d", len(tlv.Value))
+		return m
+	}
+	for p := 0; p < len(tlv.Value); p += 4 {
+		t := NLRIMessageType(binary.BigEndian.Uint16(tlv.Value[p:p+2]), tlv.Value[p+2])
+		if _, ok := m[t]; ok {
+			continue
+		}
+		m[t] = tlv.Value[p+3] >= 2
+	}
+
+	return m
+}
+
 // IsMultiLabelCapable returns true or false if Open message originated by a bgp speaker
 // supporting Multiple Label Capability
 func (o *OpenMessage) IsMultiLabelCapable() bool {
