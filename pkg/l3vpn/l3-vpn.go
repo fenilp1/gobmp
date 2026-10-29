@@ -36,8 +36,9 @@ type Options struct {
 	// PathID is set when ADD-PATH is negotiated: a 4-octet Path Identifier
 	// precedes the Length field (RFC 8277 §2.2, §2.3; RFC 7911 §3).
 	PathID bool
-	// SRv6 is set when the label field carries SRv6 SID bits (RFC 9252
-	// transposition); exactly one label field is read.
+	// SRv6 is set when the label field carries SRv6 SID bits (RFC 9252 §4
+	// transposition, see bgp.Update.HasSRv6Transposition); exactly one label
+	// field is read.
 	SRv6 bool
 	// MultiLabel is the Multiple Labels Capability state; see parseLabelStack.
 	MultiLabel MultiLabel

@@ -98,6 +98,121 @@ func (up *Update) HasPrefixSID() bool {
 	return false
 }
 
+// HasSRv6Transposition reports whether the label fields of this update's L3
+// service NLRI carry SRv6 SID bits under the Transposition Scheme (RFC 9252
+// §4). The decision is taken from the first Prefix-SID attribute (RFC 8669
+// §6), its first SRv6 L3 Service TLV (type 5; RFC 9252 §7), that TLV's
+// first SRv6 SID Information Sub-TLV (§3.1) and its SRv6 SID Structure
+// Sub-Sub-TLV: the Transposition Length must be non-zero (§3.2.1). A
+// Prefix-SID with only SR-MPLS TLVs (RFC 8669), or with an SRv6 SID sent
+// whole, leaves an MPLS label in the label field (§5.1, §5.2). The SRv6 L2
+// Service TLV (type 6) does not apply to L3 routes and is only checked for
+// framing. A Prefix-SID whose TLV framing or RFC 8669 TLV lengths are
+// malformed anywhere is not used (RFC 9252 §7, RFC 8669 §6), so it reports
+// false.
+func (up *Update) HasSRv6Transposition() bool {
+	for _, attr := range up.PathAttributes {
+		if attr.AttributeType == 40 {
+			return prefixSIDHasTransposition(attr.Attribute)
+		}
+	}
+	return false
+}
+
+// prefixSIDHasTransposition validates the TLV framing of a whole Prefix-SID
+// attribute value (Type, 2-octet Length, Value; RFC 8669 §3), the lengths of
+// the Label-Index and Originator SRGB TLVs and the nested framing of every
+// SRv6 Service TLV, and reports the transposition state of the first SRv6 L3
+// Service TLV.
+func prefixSIDHasTransposition(b []byte) bool {
+	transposed, seenL3 := false, false
+	for p := 0; p < len(b); {
+		if p+3 > len(b) {
+			return false
+		}
+		t, l := b[p], int(binary.BigEndian.Uint16(b[p+1:p+3]))
+		p += 3
+		if p+l > len(b) {
+			return false
+		}
+		// RFC 8669 §6: a TLV length outside the TLV's constraints makes the
+		// attribute malformed. Label-Index (§3.1) "Length: 7"; Originator
+		// SRGB (§3.2) "Length: ... 2 + (non-zero multiple of 6)".
+		if (t == 1 && l != 7) || (t == 3 && (l < 8 || (l-2)%6 != 0)) {
+			return false
+		}
+		if t == 5 || t == 6 {
+			ok, tr := srv6ServiceCheck(b[p : p+l])
+			if !ok {
+				return false
+			}
+			if t == 5 && !seenL3 {
+				seenL3, transposed = true, tr
+			}
+		}
+		p += l
+	}
+	return transposed
+}
+
+// srv6ServiceCheck walks an SRv6 Service TLV value: Reserved, then Sub-TLVs
+// (RFC 9252 §2). ok is false when the TLV is malformed (§7). transposed is
+// the state of the first SRv6 SID Information Sub-TLV (type 1, §3.1).
+func srv6ServiceCheck(b []byte) (ok, transposed bool) {
+	if len(b) < 1 {
+		return false, false
+	}
+	seenInfo := false
+	for p := 1; p < len(b); {
+		if p+3 > len(b) {
+			return false, false
+		}
+		t, l := b[p], int(binary.BigEndian.Uint16(b[p+1:p+3]))
+		p += 3
+		if p+l > len(b) {
+			return false, false
+		}
+		if t == 1 {
+			ok, tr := sidInformationCheck(b[p : p+l])
+			if !ok {
+				return false, false
+			}
+			if !seenInfo {
+				seenInfo, transposed = true, tr
+			}
+		}
+		p += l
+	}
+	return true, transposed
+}
+
+// sidInformationCheck walks an SRv6 SID Information Sub-TLV value: Reserved1,
+// SID, Flags, Endpoint Behavior and Reserved2 (21 octets), then Sub-Sub-TLVs
+// (RFC 9252 §3.1). ok is false when it is malformed (§7). transposed is set
+// when its first SRv6 SID Structure Sub-Sub-TLV (type 1, §3.2.1) has a
+// non-zero Transposition Length, the fifth octet of its value.
+func sidInformationCheck(b []byte) (ok, transposed bool) {
+	if len(b) < 21 {
+		return false, false
+	}
+	seenStructure := false
+	for q := 21; q < len(b); {
+		if q+3 > len(b) {
+			return false, false
+		}
+		t, l := b[q], int(binary.BigEndian.Uint16(b[q+1:q+3]))
+		q += 3
+		if q+l > len(b) {
+			return false, false
+		}
+		if t == 1 && !seenStructure {
+			seenStructure, transposed = true, l >= 6 && b[q+4] != 0
+		}
+		q += l
+	}
+	return true, transposed
+}
+
 func (up *Update) GetNLRIType() (uint8, int) {
 	if len(up.PathAttributes) == 0 {
 		// Fall back to default NLRI
