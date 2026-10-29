@@ -12,7 +12,7 @@ func TestUnmarshalRTCNLRITransportClassRT(t *testing.T) {
 		fail bool
 	}{
 		{name: "transitive TC RT 100", rt: []byte{0x0a, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x64}, want: "RTC{AS=65000, RT=transport-target:0:100}"},
-		{name: "non-transitive TC RT 200", rt: []byte{0x4a, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc8}, want: "RTC{AS=65000, RT=transport-target:0:200}"},
+		{name: "non-transitive TC RT 200", rt: []byte{0x4a, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc8}, want: "RTC{AS=65000, RT=nt-transport-target:0:200}"},
 		{name: "TC type with non RT sub-type", rt: []byte{0x0a, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x64}, fail: true},
 	}
 	for _, tt := range tests {

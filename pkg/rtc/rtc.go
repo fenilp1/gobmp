@@ -151,10 +151,14 @@ func (n *NLRI) String() string {
 			as := binary.BigEndian.Uint32(n.RouteTarget[2:6])
 			val := binary.BigEndian.Uint16(n.RouteTarget[6:8])
 			return fmt.Sprintf("RTC{AS=%d, RT=%d:%d}", n.OriginAS, as, val)
-		case 0x0a: // Transport Class: 2-octet Reserved, 4-octet TC ID (RFC 9832 §4.3)
+		case 0x0a: // Transport Class (0x0a, or 0x4a non-transitive): 2-octet Reserved, 4-octet TC ID (RFC 9832 §4.3)
 			reserved := binary.BigEndian.Uint16(n.RouteTarget[2:4])
 			id := binary.BigEndian.Uint32(n.RouteTarget[4:8])
-			return fmt.Sprintf("RTC{AS=%d, RT=transport-target:%d:%d}", n.OriginAS, reserved, id)
+			name := "transport-target"
+			if n.RouteTarget[0]&0x40 != 0 { // 0x4a, non-transitive
+				name = "nt-transport-target"
+			}
+			return fmt.Sprintf("RTC{AS=%d, RT=%s:%d:%d}", n.OriginAS, name, reserved, id)
 		default:
 			return fmt.Sprintf("RTC{AS=%d, RT=0x%x}", n.OriginAS, n.RouteTarget)
 		}
