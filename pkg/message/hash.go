@@ -28,6 +28,8 @@ func ensureMessageHash(msg any) {
 		if m != nil {
 			setL3VPNPrefixHash(*m)
 		}
+	case *ClassfulTransportPrefix:
+		setClassfulTransportPrefixHash(m)
 	case *MUPPrefix:
 		setMUPPrefixHash(m)
 	case **MUPPrefix:
@@ -83,6 +85,27 @@ func setL3VPNPrefixHash(m *L3VPNPrefix) {
 		strconv.FormatBool(m.IsIPv4),
 		strconv.FormatInt(int64(m.PathID), 10),
 		labelsHashPart(m.Labels),
+	)
+}
+
+// setClassfulTransportPrefixHash hashes the BGP CT route key, RD:prefix plus
+// the ADD-PATH Path Identifier (RFC 9832 §6.1, §7.6). Labels are left out: a
+// withdraw carries no label (RFC 8277 §2.4) and must hash the same as the
+// announcement.
+func setClassfulTransportPrefixHash(m *ClassfulTransportPrefix) {
+	if m == nil || m.Hash != "" || m.IsEOR {
+		return
+	}
+	m.Hash = hashParts(
+		"bgp_ct",
+		m.RouterHash,
+		m.PeerHash,
+		m.VPNRD,
+		strconv.FormatUint(uint64(m.VPNRDType), 10),
+		m.Prefix,
+		strconv.FormatInt(int64(m.PrefixLen), 10),
+		strconv.FormatBool(m.IsIPv4),
+		strconv.FormatInt(int64(m.PathID), 10),
 	)
 }
 

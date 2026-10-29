@@ -6,6 +6,7 @@ import (
 	"net"
 
 	"github.com/golang/glog"
+	"github.com/sbezverk/gobmp/pkg/base"
 	"github.com/sbezverk/gobmp/pkg/bgp"
 	"github.com/sbezverk/gobmp/pkg/bmp"
 	"github.com/sbezverk/gobmp/pkg/l3vpn"
@@ -14,6 +15,13 @@ import (
 // l3vpn process MP_REACH_NLRI AFI 1/2 SAFI 128 update message and returns
 // L3VPN prefix object.
 func (p *producer) l3vpn(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, update *bgp.Update) ([]L3VPNPrefix, error) {
+	return p.rdLabeledPrefixes(nlri.GetNLRIL3VPN, nlri, op, ph, update)
+}
+
+// rdLabeledPrefixes builds L3VPNPrefix objects from RFC 8277 NLRI that carry
+// an RD ahead of the prefix (L3VPN SAFI 128 and BGP CT SAFI 76); decode
+// selects the AFI/SAFI specific getter.
+func (p *producer) rdLabeledPrefixes(decode func() (*base.MPNLRI, error), nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, update *bgp.Update) ([]L3VPNPrefix, error) {
 	var operation string
 	switch op {
 	case 0:
@@ -24,7 +32,7 @@ func (p *producer) l3vpn(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, update 
 		return nil, fmt.Errorf("unknown operation %d", op)
 	}
 
-	nlril3vpn, err := nlri.GetNLRIL3VPN()
+	nlril3vpn, err := decode()
 	if errors.Is(err, l3vpn.ErrEmptyNLRI) {
 		// Empty NLRI signals End-of-RIB per RFC 4724 §2 and is encoded as a withdrawal.
 		prfx := L3VPNPrefix{

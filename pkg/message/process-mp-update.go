@@ -252,6 +252,27 @@ func (p *producer) processMPUpdate(nlri bgp.MPNLRI, operation int, ph *bmp.PerPe
 				return
 			}
 		}
+	case 38, 39:
+		// AFI 1/2 SAFI 76 = BGP Classful Transport (RFC 9832)
+		msgs, err := p.classfulTransport(nlri, operation, ph, update)
+		if err != nil {
+			glog.Errorf("failed to produce bgp ct messages with error: %+v", err)
+			return
+		}
+		for _, m := range msgs {
+			topicType := bmp.ClassfulTransportMsg
+			if p.splitAF {
+				if m.IsIPv4 {
+					topicType = bmp.ClassfulTransportV4Msg
+				} else {
+					topicType = bmp.ClassfulTransportV6Msg
+				}
+			}
+			if err := p.marshalAndPublish(&m, topicType, []byte(m.RouterHash)); err != nil {
+				glog.Errorf("failed to process BGP CT message with error: %+v", err)
+				return
+			}
+		}
 	case 71:
 		p.processNLRI71SubTypes(nlri, operation, ph, update, false)
 	case 72:

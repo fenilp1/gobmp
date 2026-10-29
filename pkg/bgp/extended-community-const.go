@@ -120,6 +120,12 @@ const (
 	// of the BGP MUP Extended Community	[draft-ietf-bess-mup-safi]
 	ECPMUPInterworkSegment = "mup-is="
 
+	// ECPTransportTarget extended community prefix for the Transport Class Route Target	[RFC9832]
+	ECPTransportTarget = "transport-target="
+	// ECPNonTransitiveTransportTarget extended community prefix for the Non-Transitive
+	// Transport Class Route Target	[RFC9832]
+	ECPNonTransitiveTransportTarget = "nt-transport-target="
+
 	// ECPFlowspec extended community prefix for Flowspec extended community
 	ECPFlowspec = "flowspec="
 

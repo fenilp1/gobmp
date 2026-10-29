@@ -64,6 +64,12 @@ func makeExtCommunity(b []byte) (*ExtCommunity, error) {
 		ext.SubType = &st
 		l = 6
 		p++
+	case 0xa:
+		// Transport Class, transitive 0x0a and non-transitive 0x4a (RFC 9832 §13.2)
+		st := uint8(b[p])
+		ext.SubType = &st
+		l = 6
+		p++
 	}
 	ext.Value = make([]byte, l)
 	copy(ext.Value, b[p:])
@@ -258,6 +264,18 @@ var mupSubTypes = map[uint8]string{
 	0x5: ECPMUPInterworkSegment,
 }
 
+// Transitive Transport Class Extended Community Sub-Types (RFC 9832 §13.2.2.1)
+// 0x02	Route Target	[RFC9832]
+var transportClassSubTypes = map[uint8]string{
+	0x2: ECPTransportTarget,
+}
+
+// Non-Transitive Transport Class Extended Community Sub-Types (RFC 9832 §13.2.2.2)
+// 0x02	Route Target	[RFC9832]
+var nonTransTransportClassSubTypes = map[uint8]string{
+	0x2: ECPNonTransitiveTransportTarget,
+}
+
 // Non-Transitive Two-Octet AS-Specific Extended Community Sub-Types
 // 0x04	Link Bandwidth Extended Community	[draft-ietf-idr-link-bandwidth]
 // 0x80	Virtual-Network Identifier Extended Community	[draft-drao-bgp-l3vpn-virtual-network-overlays]
@@ -431,6 +449,30 @@ func type5(subType uint8, value []byte) string {
 	return s
 }
 
+// transportClassValue renders the Transport Class RT value (RFC 9832 §4.3,
+// Figure 2): a 2-octet Reserved field followed by the 4-octet Transport Class
+// ID, as "<reserved>:<id>" after the RFC's "transport-target:0:100" notation.
+// The layout of other sub-types is undefined, so they are rendered as hex.
+func transportClassValue(subType uint8, value []byte) string {
+	if subType != 0x02 {
+		return tools.MessageHex(value)
+	}
+	if len(value) < 6 {
+		return fmt.Sprintf("invalid-length=%d", len(value))
+	}
+	return fmt.Sprintf("%d:%d", binary.BigEndian.Uint16(value[0:2]), binary.BigEndian.Uint32(value[2:6]))
+}
+
+// Transitive Transport Class Extended Community (RFC 9832 §4.3, §13.2.1.1.1)
+func type0a(subType uint8, value []byte) string {
+	return getSubType(transportClassSubTypes, subType) + transportClassValue(subType, value)
+}
+
+// Non-Transitive Transport Class Extended Community (RFC 9832 §4.3, §13.2.1.1.2)
+func type4a(subType uint8, value []byte) string {
+	return getSubType(nonTransTransportClassSubTypes, subType) + transportClassValue(subType, value)
+}
+
 // 0x08 Flow spec redirect/mirror to IP next-hop [draft-simpson-idr-flowspec-redirect] 2012-09-28
 func type8(subType uint8, value []byte) string {
 	return ECPFlowspec + "redirect_to_ip_next_hop"
@@ -556,9 +598,11 @@ var extComm = map[uint8]func(uint8, []byte) string{
 	0x5:  type5,
 	0x6:  type6,
 	0x8:  type8,
+	0xa:  type0a,
 	0xc:  type12,
 	0x40: type40,
 	0x43: type43,
+	0x4a: type4a,
 	0x80: type80,
 	0x81: type81,
 	0x82: type82,

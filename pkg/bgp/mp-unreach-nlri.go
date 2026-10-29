@@ -118,6 +118,18 @@ func (mp *MPUnReachNLRI) GetNLRIL3VPN() (*base.MPNLRI, error) {
 	return nil, NewNLRINotFoundError(mp.AddressFamilyID, mp.SubAddressFamilyID, "MP_UNREACH_NLRI")
 }
 
+// GetNLRICT checks for BGP Classful Transport NLRI (AFI 1/2, SAFI 76, RFC 9832)
+// in MP_UNREACH_NLRI and decodes it with the L3VPN decoder (RFC 9832 §6.1).
+// Withdrawals use the RFC 8277 §2.4 encoding, whose Compatibility field
+// (0x800000, or 0x000000 from some implementations) the decoder skips.
+func (mp *MPUnReachNLRI) GetNLRICT() (*base.MPNLRI, error) {
+	if (mp.AddressFamilyID != 1 && mp.AddressFamilyID != 2) || mp.SubAddressFamilyID != SAFIClassfulTransport {
+		return nil, NewNLRINotFoundError(mp.AddressFamilyID, mp.SubAddressFamilyID, "MP_UNREACH_NLRI")
+	}
+	pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
+	return l3vpn.UnmarshalL3VPNNLRI(mp.WithdrawnRoutes, pathID)
+}
+
 // GetNLRIEVPN check for presence of NLRI EVPN AFI 25 and SAFI 70 in the NLRI 15 NLRI data and if exists, instantiate EVPN object
 func (mp *MPUnReachNLRI) GetNLRIEVPN() (*evpn.Route, error) {
 	if mp.AddressFamilyID == 25 && mp.SubAddressFamilyID == 70 {

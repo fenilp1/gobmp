@@ -100,6 +100,8 @@ func getAFISAFIString(afi uint16, safi uint8) string {
 		safiStr = "BGP-LS"
 	case 72:
 		safiStr = "BGP-LS-VPN"
+	case 76:
+		safiStr = "Classful Transport"
 	case 128:
 		safiStr = "MPLS-labeled VPN"
 	}

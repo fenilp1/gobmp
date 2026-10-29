@@ -83,6 +83,12 @@ const (
 	// LSOpaqueMsg defines BMP Route Monitoring message carrying a BGP-LS NLRI
 	// of a type gobmp does not decode, published raw per RFC 9552 §5.2
 	LSOpaqueMsg = 23
+	// ClassfulTransportMsg defines BMP Route Monitoring message carrying BGP Classful Transport NLRI (RFC 9832)
+	ClassfulTransportMsg = 24
+	// ClassfulTransportV4Msg defines BMP Route Monitoring message carrying BGP Classful Transport IPv4 NLRI AFI 1 SAFI 76
+	ClassfulTransportV4Msg = 244
+	// ClassfulTransportV6Msg defines BMP Route Monitoring message carrying BGP Classful Transport IPv6 NLRI AFI 2 SAFI 76
+	ClassfulTransportV6Msg = 246
 	// BMPRawMsg defines BMP RAW message type for unprocessed BMP messages
 	BMPRawMsg = 255
 )

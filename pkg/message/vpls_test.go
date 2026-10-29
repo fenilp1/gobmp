@@ -352,4 +352,5 @@ func (m *mockMPNLRI) GetNLRIMCASTVPN() (*mcastvpn.Route, error)     { return nil
 func (m *mockMPNLRI) GetNLRIMVPN() (*mcastvpn.Route, error)         { return m.mvpnRoute, nil }
 func (m *mockMPNLRI) GetNLRIRTC() (*rtc.Route, error)               { return nil, nil }
 func (m *mockMPNLRI) GetNLRIMUP() (*mup.Route, error)               { return nil, nil }
+func (m *mockMPNLRI) GetNLRICT() (*base.MPNLRI, error)              { return nil, nil }
 func (m *mockMPNLRI) GetNLRIMulticast() (*base.MPNLRI, error)       { return nil, nil }
