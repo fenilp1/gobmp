@@ -4,6 +4,12 @@ Message updates and major project changes should be documented here.
 
 ## [Unreleased]
 
+### 2026-10-30
+
+#### Changed
+
+- `base_attrs.unknown_attributes` now includes path attribute types 11–13, 19–21, 24, 28, 30, 31, 33, 34, 37, 38, 41 and 42, which were dropped
+
 ### 2026-03-01
 
 #### Added
