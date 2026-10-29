@@ -9,6 +9,7 @@ Message updates and major project changes should be documented here.
 #### Changed
 
 - `base_attrs.unknown_attributes` now includes path attribute types 11–13, 19–21, 24, 28, 30, 31, 33, 34, 37, 38, 41 and 42, which were dropped
+- `base_attrs.unknown_attributes` now includes a malformed ATTR_SET as type 128 instead of only logging it per RFC 6368
 
 ### 2026-03-01
 
