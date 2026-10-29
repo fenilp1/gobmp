@@ -116,6 +116,11 @@ func formatRouteTarget(rt []byte) string {
 		val := binary.BigEndian.Uint16(rt[6:8])
 		return fmt.Sprintf("%d:%d", as, val)
 
+	case 0x0a: // Transport Class RT, 2-octet Reserved and 4-octet TC ID (RFC 9832 §4.3)
+		reserved := binary.BigEndian.Uint16(rt[2:4])
+		id := binary.BigEndian.Uint32(rt[4:8])
+		return fmt.Sprintf("transport-target:%d:%d", reserved, id)
+
 	default:
 		return fmt.Sprintf("0x%x", rt)
 	}
