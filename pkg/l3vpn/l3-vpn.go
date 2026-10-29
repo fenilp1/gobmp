@@ -14,22 +14,6 @@ import (
 // signaling an End-of-RIB marker per RFC 4724 §2.
 var ErrEmptyNLRI = errors.New("NLRI length is 0")
 
-// MultiLabel is a session's Multiple Labels Capability state for an AFI/SAFI
-// (RFC 8277 §2.1, §2.3). It selects how announced label stacks are read.
-type MultiLabel uint8
-
-const (
-	// MultiLabelUnknown means the capability state is not known, e.g. no
-	// Peer Up was seen for the table.
-	MultiLabelUnknown MultiLabel = iota
-	// MultiLabelAbsent means the capability is known not to be both sent and
-	// received, so NLRI carry exactly one label (RFC 8277 §2.2).
-	MultiLabelAbsent
-	// MultiLabelConfirmed means both OPEN messages list the AFI/SAFI with a
-	// Count of at least 2 (RFC 8277 §2.3).
-	MultiLabelConfirmed
-)
-
 // Options gives the session and attribute context that RFC 8277 VPN NLRI
 // (AFI 1/2, SAFI 128 and the same layout in SAFI 76) is decoded in.
 type Options struct {
@@ -40,8 +24,9 @@ type Options struct {
 	// transposition, see bgp.Update.HasSRv6Transposition); exactly one label
 	// field is read.
 	SRv6 bool
-	// MultiLabel is the Multiple Labels Capability state; see parseLabelStack.
-	MultiLabel MultiLabel
+	// MultiLabel is the Multiple Labels Capability state; see
+	// base.DecodeLabeledNLRI.
+	MultiLabel base.MultiLabel
 	// Withdraw selects the MP_UNREACH_NLRI encoding (RFC 8277 §2.4): a 3-octet
 	// Compatibility field, ignored on reception, in place of the labels.
 	Withdraw bool
@@ -70,37 +55,24 @@ func UnmarshalL3VPNNLRI(b []byte, opts Options) (*base.MPNLRI, error) {
 	return parseLabelStack(b, opts)
 }
 
-// parseLabelStack parses announced label stacks in an order chosen by the
-// Multiple Labels Capability state:
-//   - Confirmed: labels up to the one with the S bit set only (RFC 8277 §2.3).
-//   - Absent: exactly one label with its S bit ignored (RFC 8277 §2.2), and
-//     the S bit walk only if that parse is invalid.
-//   - Unknown: the S bit walk, then exactly one label if that is invalid.
-//
-// A passive collector must stay correct when its view of the capability is
-// stale or shared between sessions, hence the fallbacks; for a compliant
-// router both readings agree. Strict single-label decoding goes first when
-// the capability is known absent because the S bit walk can produce a valid
-// looking but wrong parse when an RD byte reads as a label with S set.
-// Withdrawals and SRv6 have no label stack to choose.
+// parseLabelStack picks the label field reading: the Compatibility field for
+// withdrawals, one SRv6 field, or the announced label stack readings that
+// base.DecodeLabeledNLRI orders by the Multiple Labels Capability state.
 func parseLabelStack(b []byte, opts Options) (*base.MPNLRI, error) {
-	if opts.Withdraw || opts.SRv6 || opts.MultiLabel == MultiLabelConfirmed {
-		return parseL3VPNNLRI(b, opts, false)
+	switch {
+	case opts.Withdraw:
+		return parseL3VPNNLRI(b, opts, base.CompatibilityField)
+	case opts.SRv6:
+		return parseL3VPNNLRI(b, opts, base.SRv6Label)
 	}
-	first := opts.MultiLabel == MultiLabelAbsent
-	mp, err := parseL3VPNNLRI(b, opts, first)
-	if err == nil {
-		return mp, nil
-	}
-	if mp, ferr := parseL3VPNNLRI(b, opts, !first); ferr == nil {
-		return mp, nil
-	}
-	return nil, err
+	return base.DecodeLabeledNLRI(opts.MultiLabel, func(f base.LabelField) (*base.MPNLRI, error) {
+		return parseL3VPNNLRI(b, opts, f)
+	})
 }
 
-// parseL3VPNNLRI performs the actual parsing without any recursion. With
-// singleLabel set, each NLRI carries exactly one label whose S bit is ignored.
-func parseL3VPNNLRI(b []byte, opts Options, singleLabel bool) (*base.MPNLRI, error) {
+// parseL3VPNNLRI performs the actual parsing without any recursion, reading
+// the label field of each NLRI as f says.
+func parseL3VPNNLRI(b []byte, opts Options, f base.LabelField) (*base.MPNLRI, error) {
 	maxPrefixBits := 32
 	if opts.IPv6 {
 		maxPrefixBits = 128
@@ -109,7 +81,7 @@ func parseL3VPNNLRI(b []byte, opts Options, singleLabel bool) (*base.MPNLRI, err
 	p := 0
 
 	for p < len(b) {
-		up := base.Route{Label: make([]*base.Label, 0)}
+		up := base.Route{}
 
 		// Optional Path ID (4 bytes)
 		if opts.PathID {
@@ -130,32 +102,13 @@ func parseL3VPNNLRI(b []byte, opts Options, singleLabel bool) (*base.MPNLRI, err
 		}
 		p++
 
-		if opts.Withdraw {
-			// RFC 8277 §2.4: the 3-octet Compatibility field (0x800000, or
-			// 0x000000 from some implementations) MUST be ignored on reception.
-			if p+3 > len(b) {
-				return nil, fmt.Errorf("not enough bytes for compatibility field at pos %d", p)
-			}
-			up.Label = nil
-			p += 3
-		} else {
-			for {
-				if p+3 > len(b) {
-					return nil, fmt.Errorf("not enough bytes for label at pos %d", p)
-				}
-				l, err := base.MakeLabel(b[p:p+3], opts.SRv6)
-				if err != nil {
-					return nil, fmt.Errorf("failed to parse label at pos %d: %w", p, err)
-				}
-				up.Label = append(up.Label, l)
-				p += 3
-				// RFC 8277 §2.2: without the Multiple Labels Capability there
-				// is exactly one label and its S bit MUST be ignored.
-				if opts.SRv6 || singleLabel || l.BoS {
-					break
-				}
-			}
+		// Labels, or the Compatibility field of a withdrawal (RFC 8277 §2.4)
+		labels, n, err := base.ReadLabelField(b[p:], f)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse label field at pos %d: %w", p, err)
 		}
+		up.Label = labels
+		p += n
 
 		// Route Distinguisher (8 bytes)
 		if p+8 > len(b) {
@@ -168,12 +121,8 @@ func parseL3VPNNLRI(b []byte, opts Options, singleLabel bool) (*base.MPNLRI, err
 		up.RD = rd
 		p += 8
 
-		// Overhead in bits: (label bytes or 3 bytes for compat) + 8-byte RD
-		labelBytes := 3
-		if up.Label != nil {
-			labelBytes = len(up.Label) * 3
-		}
-		overheadBits := (labelBytes * 8) + 64
+		// Overhead in bits: label field + 8-byte RD
+		overheadBits := n*8 + 64
 
 		// Exact prefix length in bits. A prefix longer than the address family
 		// allows makes the NLRI malformed (RFC 8277 §2.2, RFC 7606 §3(j)).

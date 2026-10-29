@@ -6,8 +6,8 @@ import (
 	"sync"
 
 	"github.com/golang/glog"
+	"github.com/sbezverk/gobmp/pkg/base"
 	"github.com/sbezverk/gobmp/pkg/bmp"
-	"github.com/sbezverk/gobmp/pkg/l3vpn"
 	"github.com/sbezverk/gobmp/pkg/pub"
 )
 
@@ -25,7 +25,10 @@ type PerTableProperties struct {
 	// multiLabelCapable holds the NLRI types for which the Multiple Labels
 	// Capability was both sent and received (RFC 8277 §2.3)
 	multiLabelCapable map[int]bool
-	tableInfoTLVs     []bmp.InformationalTLV
+	// pathIDState holds the ADD-PATH state of the NLRI types listed in
+	// either OPEN message; see pathIDStates
+	pathIDState   map[int]base.PathIDState
+	tableInfoTLVs []bmp.InformationalTLV
 }
 
 // Config holds producer configuration options
@@ -274,16 +277,33 @@ func (p *producer) GetMultiLabelCapability(tableKey string) map[int]bool {
 
 // multiLabelState returns the Multiple Labels Capability state of NLRI type
 // nlriType in a table: unknown if no Peer Up was seen for the table.
-func (p *producer) multiLabelState(tableKey string, nlriType int) l3vpn.MultiLabel {
+func (p *producer) multiLabelState(tableKey string, nlriType int) base.MultiLabel {
 	caps := p.GetMultiLabelCapability(tableKey)
 	switch {
 	case caps == nil:
-		return l3vpn.MultiLabelUnknown
+		return base.MultiLabelUnknown
 	case caps[nlriType]:
-		return l3vpn.MultiLabelConfirmed
+		return base.MultiLabelConfirmed
 	default:
-		return l3vpn.MultiLabelAbsent
+		return base.MultiLabelAbsent
 	}
+}
+
+// pathIDState returns the ADD-PATH state of NLRI type nlriType in a table:
+// unknown if no Peer Up was seen for the table, and no Path IDs for an NLRI
+// type that neither OPEN message lists.
+func (p *producer) pathIDState(tableKey string, nlriType int) base.PathIDState {
+	p.tableLock.RLock()
+	defer p.tableLock.RUnlock()
+
+	props, ok := p.tableProperties[tableKey]
+	if !ok || props.pathIDState == nil {
+		return base.PathIDUnknown
+	}
+	if s, ok := props.pathIDState[nlriType]; ok {
+		return s
+	}
+	return base.PathIDAbsent
 }
 
 // GetTableName returns table name from Table Informational TLVs

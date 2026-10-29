@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/sbezverk/gobmp/pkg/base"
-	"github.com/sbezverk/gobmp/pkg/l3vpn"
 )
 
 // RFC 8277 conformance of the VPN NLRI decoder shared by L3VPN (SAFI 128) and
@@ -24,7 +23,7 @@ func vpnTestNLRI(parts ...[]byte) []byte {
 
 // decodeVPN decodes nlri as MP_REACH_NLRI (withdraw false) or MP_UNREACH_NLRI
 // (withdraw true) of AFI afi and SAFI safi through the SAFI's getter.
-func decodeVPN(t *testing.T, afi uint16, safi uint8, withdraw bool, ml l3vpn.MultiLabel, nlri []byte) (*base.MPNLRI, error) {
+func decodeVPN(t *testing.T, afi uint16, safi uint8, withdraw bool, ml base.MultiLabel, nlri []byte) (*base.MPNLRI, error) {
 	t.Helper()
 	var mp MPNLRI
 	if withdraw {
@@ -51,7 +50,7 @@ func TestVPNNLRIRFC8277Conformance(t *testing.T) {
 		name     string
 		afi      uint16
 		withdraw bool
-		ml       l3vpn.MultiLabel
+		ml       base.MultiLabel
 		nlri     []byte
 		labels   []uint32 // expected labels; nil for none
 		cidr     string   // expected prefix, if set
@@ -77,14 +76,14 @@ func TestVPNNLRIRFC8277Conformance(t *testing.T) {
 			// first label of 0x80000 with S=0 is a label in an announcement.
 			name:   "announce first label 0x800000 with multiple labels",
 			afi:    1,
-			ml:     l3vpn.MultiLabelConfirmed,
+			ml:     base.MultiLabelConfirmed,
 			nlri:   vpnTestNLRI([]byte{0x90, 0x80, 0x00, 0x00, 0x00, 0x3e, 0x81}, vpnTestRD, v4Prefix),
 			labels: []uint32{0x80000, 1000},
 		},
 		{
 			name:   "announce two labels with multiple labels",
 			afi:    1,
-			ml:     l3vpn.MultiLabelConfirmed,
+			ml:     base.MultiLabelConfirmed,
 			nlri:   vpnTestNLRI([]byte{0x90, 0x00, 0x06, 0x40, 0x00, 0x0c, 0x81}, vpnTestRD, v4Prefix),
 			labels: []uint32{100, 200},
 		},
@@ -99,7 +98,7 @@ func TestVPNNLRIRFC8277Conformance(t *testing.T) {
 		{
 			name:   "announce S=0, capability absent",
 			afi:    1,
-			ml:     l3vpn.MultiLabelAbsent,
+			ml:     base.MultiLabelAbsent,
 			nlri:   vpnTestNLRI([]byte{0x78, 0x00, 0x3e, 0x80}, vpnTestRD, v4Prefix),
 			labels: []uint32{1000},
 		},
@@ -109,7 +108,7 @@ func TestVPNNLRIRFC8277Conformance(t *testing.T) {
 			// known absent capability decodes one label first.
 			name:   "announce S=0 with label-like type 0 RD, capability absent",
 			afi:    1,
-			ml:     l3vpn.MultiLabelAbsent,
+			ml:     base.MultiLabelAbsent,
 			nlri:   vpnTestNLRI([]byte{0x78, 0x00, 0x3e, 0x80}, []byte{0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01}, v4Prefix),
 			labels: []uint32{1000},
 			rd:     "256:1",
@@ -117,7 +116,7 @@ func TestVPNNLRIRFC8277Conformance(t *testing.T) {
 		{
 			name:   "announce S=0 with label-like type 1 RD, capability absent",
 			afi:    1,
-			ml:     l3vpn.MultiLabelAbsent,
+			ml:     base.MultiLabelAbsent,
 			nlri:   vpnTestNLRI([]byte{0x78, 0x00, 0x3e, 0x80}, []byte{0x00, 0x01, 0x0b, 0x00, 0x01, 0x01, 0x00, 0x05}, v4Prefix),
 			labels: []uint32{1000},
 			rd:     "11.0.1.1:5",
@@ -127,7 +126,7 @@ func TestVPNNLRIRFC8277Conformance(t *testing.T) {
 			// S bit walk is used.
 			name:   "announce two labels, capability absent",
 			afi:    1,
-			ml:     l3vpn.MultiLabelAbsent,
+			ml:     base.MultiLabelAbsent,
 			nlri:   vpnTestNLRI([]byte{0x90, 0x00, 0x06, 0x40, 0x00, 0x0c, 0x81}, vpnTestRD, v4Prefix),
 			labels: []uint32{100, 200},
 		},
@@ -154,7 +153,7 @@ func TestVPNNLRIRFC8277Conformance(t *testing.T) {
 			// binding two labels without the capability is not compliant.
 			name:   "announce IPv6 two labels, capability absent",
 			afi:    2,
-			ml:     l3vpn.MultiLabelAbsent,
+			ml:     base.MultiLabelAbsent,
 			nlri:   vpnTestNLRI([]byte{0xb0, 0x00, 0x06, 0x40, 0x00, 0x00, 0x31}, vpnTestRD, []byte{0x20, 0x01, 0x0d, 0xb8, 0x00, 0x01, 0x00, 0x00}),
 			labels: []uint32{100},
 			rd:     "12544:25600",
@@ -164,7 +163,7 @@ func TestVPNNLRIRFC8277Conformance(t *testing.T) {
 			// A confirmed capability never falls back to a single label.
 			name: "announce S=0 single label with multiple labels",
 			afi:  1,
-			ml:   l3vpn.MultiLabelConfirmed,
+			ml:   base.MultiLabelConfirmed,
 			nlri: vpnTestNLRI([]byte{0x78, 0x00, 0x3e, 0x80}, vpnTestRD, v4Prefix),
 			fail: true,
 		},
@@ -185,14 +184,14 @@ func TestVPNNLRIRFC8277Conformance(t *testing.T) {
 		{
 			name:   "announce label 0x000000, capability absent",
 			afi:    1,
-			ml:     l3vpn.MultiLabelAbsent,
+			ml:     base.MultiLabelAbsent,
 			nlri:   vpnTestNLRI([]byte{0x78, 0x00, 0x00, 0x00}, vpnTestRD, v4Prefix),
 			labels: []uint32{0},
 		},
 		{
 			name:   "announce label 0x800000, capability absent",
 			afi:    1,
-			ml:     l3vpn.MultiLabelAbsent,
+			ml:     base.MultiLabelAbsent,
 			nlri:   vpnTestNLRI([]byte{0x78, 0x80, 0x00, 0x00}, vpnTestRD, v4Prefix),
 			labels: []uint32{0x80000},
 		},

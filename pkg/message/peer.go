@@ -5,6 +5,8 @@ import (
 	"net"
 
 	"github.com/golang/glog"
+	"github.com/sbezverk/gobmp/pkg/base"
+	"github.com/sbezverk/gobmp/pkg/bgp"
 	"github.com/sbezverk/gobmp/pkg/bmp"
 )
 
@@ -88,6 +90,8 @@ func (p *producer) producePeerMessage(op int, msg bmp.Message, peerID bmp.PeerId
 				}
 			}
 		}
+
+		ptp.pathIDState = pathIDStates(peerUpMsg.SentOpen, peerUpMsg.ReceivedOpen, msg.PeerHeader.PeerType == bmp.PeerType3)
 
 		// RFC 8277 §2.3: multiple labels are used for an AFI/SAFI only when
 		// both OPEN messages carry the Multiple Labels Capability for it
@@ -173,4 +177,31 @@ func speakerAddress(localIP, connIP string) string {
 func isSpecificAddress(s string) bool {
 	ip := net.ParseIP(s)
 	return ip != nil && !ip.IsUnspecified()
+}
+
+// pathIDStates returns, per NLRI type listed in either OPEN, whether NLRI
+// carry ADD-PATH Path Identifiers. They flow from a speaker that advertised
+// Send to one that advertised Receive (RFC 7911 §4, §5). A table holds the
+// routes received from the peer and, for Adj-RIB-Out (RFC 8671), those sent
+// to it, so ADD-PATH in one direction only leaves the state unknown. For a
+// Loc-RIB the presence of the capability means Path IDs are used (RFC 9069
+// §5.2). NLRI types in neither OPEN have no Path IDs.
+func pathIDStates(sent, recv *bgp.OpenMessage, locRIB bool) map[int]base.PathIDState {
+	local, remote := sent.AddPathSendReceive(), recv.AddPathSendReceive()
+	m := make(map[int]base.PathIDState)
+	for _, caps := range []map[int]uint8{local, remote} {
+		for t := range caps {
+			in := remote[t]&2 != 0 && local[t]&1 != 0
+			out := local[t]&2 != 0 && remote[t]&1 != 0
+			switch {
+			case locRIB || in && out:
+				m[t] = base.PathIDPresent
+			case !in && !out:
+				m[t] = base.PathIDAbsent
+			default:
+				m[t] = base.PathIDUnknown
+			}
+		}
+	}
+	return m
 }

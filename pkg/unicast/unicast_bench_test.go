@@ -19,7 +19,7 @@ var luNLRIMulti = []byte{
 func BenchmarkUnmarshalLUNLRI_Single(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_, err := UnmarshalLUNLRI(luNLRISingle, false)
+		_, err := UnmarshalLUNLRI(luNLRISingle, Options{PathID: false})
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -29,7 +29,7 @@ func BenchmarkUnmarshalLUNLRI_Single(b *testing.B) {
 func BenchmarkUnmarshalLUNLRI_Multi(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_, err := UnmarshalLUNLRI(luNLRIMulti, true)
+		_, err := UnmarshalLUNLRI(luNLRIMulti, Options{PathID: true})
 		if err != nil {
 			b.Fatal(err)
 		}

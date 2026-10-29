@@ -7,6 +7,7 @@ Message updates and major project changes should be documented here.
 #### Changed
 
 - L3VPN and BGP CT announcements whose label field is 0x000000 or 0x800000 now publish that label (0 or 524288) per RFC 8277 §2.2 instead of no label, so these routes get new hashes
+- Labeled unicast (SAFI 4) follows RFC 8277 §2: announcements with label 0x800000 publish label 524288 (new hashes), withdrawals ignore the Compatibility field and publish no labels, one label with S=0 is published when the Multiple Labels Capability is not confirmed, IPv4 prefixes over 32 bits are dropped instead of capped, and the Path ID flag is only flipped on a failed parse while the table's ADD-PATH state is unknown
 
 ### 2026-03-01
 

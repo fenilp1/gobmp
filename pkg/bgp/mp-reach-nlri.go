@@ -33,9 +33,14 @@ type MPReachNLRI struct {
 	// §4 Transposition Scheme; see Update.HasSRv6Transposition.
 	SRv6 bool
 	// MultiLabel is the session's RFC 8277 Multiple Labels Capability state
-	// for this AFI/SAFI; it selects how VPN NLRI label stacks are read.
-	MultiLabel l3vpn.MultiLabel
-	addPath    map[int]bool
+	// for this AFI/SAFI; it selects how labeled unicast and VPN NLRI label
+	// stacks are read.
+	MultiLabel base.MultiLabel
+	// PathIDs is the table's ADD-PATH state for this AFI/SAFI; for labeled
+	// unicast it decides whether a failed parse may be retried with the Path
+	// ID flag flipped.
+	PathIDs base.PathIDState
+	addPath map[int]bool
 }
 
 // GetAFISAFIType returns underlaying NLRI's type based on AFI/SAFI
@@ -255,7 +260,12 @@ func (mp *MPReachNLRI) GetNLRIMulticast() (*base.MPNLRI, error) {
 func (mp *MPReachNLRI) GetNLRILU() (*base.MPNLRI, error) {
 	if (mp.AddressFamilyID == 1 || mp.AddressFamilyID == 2) && mp.SubAddressFamilyID == 4 {
 		pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
-		nlri, err := unicast.UnmarshalLUNLRI(mp.NLRI, pathID)
+		nlri, err := unicast.UnmarshalLUNLRI(mp.NLRI, unicast.Options{
+			PathIDs:    mp.PathIDs,
+			PathID:     pathID,
+			MultiLabel: mp.MultiLabel,
+			IPv6:       mp.AddressFamilyID == 2,
+		})
 		if err != nil {
 			return nil, err
 		}

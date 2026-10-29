@@ -64,6 +64,7 @@ func (p *producer) processMPReach(attribute []byte, ph *bmp.PerPeerHeader, updat
 	reachableUpdate := copyUpdate(update)
 	if reach, ok := nlri.(*bgp.MPReachNLRI); ok {
 		reach.MultiLabel = p.multiLabelState(ph.GetTableKey(), reach.GetAFISAFIType())
+		reach.PathIDs = p.pathIDState(ph.GetTableKey(), reach.GetAFISAFIType())
 		validateNHC(reachableUpdate, reach.AddressFamilyID, reach.SubAddressFamilyID, reach.NextHopAddress, ph)
 	}
 	p.processMPUpdate(nlri, AddPrefix, ph, reachableUpdate)
@@ -74,6 +75,9 @@ func (p *producer) processMPUnreach(attribute []byte, ph *bmp.PerPeerHeader, upd
 	if err != nil {
 		glog.Errorf("failed to process MP_UNREACH_NLRI with error: %+v", err)
 		return
+	}
+	if unreach, ok := nlri.(*bgp.MPUnReachNLRI); ok {
+		unreach.PathIDs = p.pathIDState(ph.GetTableKey(), unreach.GetAFISAFIType())
 	}
 	p.processMPUpdate(nlri, DelPrefix, ph, withoutNHC(update))
 }

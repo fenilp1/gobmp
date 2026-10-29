@@ -27,6 +27,10 @@ type MPUnReachNLRI struct {
 	WithdrawnRoutes    []byte
 	addPath            map[int]bool
 	SRv6               bool
+	// PathIDs is the table's ADD-PATH state for this AFI/SAFI; for labeled
+	// unicast it decides whether a failed parse may be retried with the Path
+	// ID flag flipped.
+	PathIDs base.PathIDState
 }
 
 // GetAFISAFIType returns underlaying NLRI's type based on AFI/SAFI
@@ -196,7 +200,12 @@ func (mp *MPUnReachNLRI) GetNLRIMulticast() (*base.MPNLRI, error) {
 func (mp *MPUnReachNLRI) GetNLRILU() (*base.MPNLRI, error) {
 	if (mp.AddressFamilyID == 1 || mp.AddressFamilyID == 2) && mp.SubAddressFamilyID == 4 {
 		pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
-		nlri, err := unicast.UnmarshalLUNLRI(mp.WithdrawnRoutes, pathID)
+		nlri, err := unicast.UnmarshalLUNLRI(mp.WithdrawnRoutes, unicast.Options{
+			PathIDs:  mp.PathIDs,
+			PathID:   pathID,
+			Withdraw: true,
+			IPv6:     mp.AddressFamilyID == 2,
+		})
 		if err != nil {
 			return nil, err
 		}

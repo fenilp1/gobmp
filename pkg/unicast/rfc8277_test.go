@@ -162,7 +162,7 @@ func TestRFC8277_LabeledUnicastIPv4(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalLUNLRI(tt.input, tt.pathID)
+			got, err := UnmarshalLUNLRI(tt.input, Options{PathID: tt.pathID})
 			if err != nil {
 				t.Fatalf("UnmarshalLUNLRI() error = %v", err)
 			}
@@ -299,7 +299,7 @@ func TestRFC8277_LabeledUnicastIPv6(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalLUNLRI(tt.input, tt.pathID)
+			got, err := UnmarshalLUNLRI(tt.input, Options{PathID: tt.pathID, IPv6: true})
 			if err != nil {
 				t.Fatalf("UnmarshalLUNLRI() error = %v", err)
 			}
@@ -317,6 +317,7 @@ func TestRFC8277_MultiLabelStack(t *testing.T) {
 		name   string
 		input  []byte
 		pathID bool
+		ipv6   bool
 		want   *base.MPNLRI
 	}{
 		{
@@ -398,6 +399,7 @@ func TestRFC8277_MultiLabelStack(t *testing.T) {
 		},
 		{
 			name: "Two label stack with IPv6 prefix (6PE scenario)",
+			ipv6: true,
 			// Length=0x70(112)=48 label bits + 64 prefix bits
 			input: []byte{
 				0x70,             // Length=112
@@ -423,7 +425,7 @@ func TestRFC8277_MultiLabelStack(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalLUNLRI(tt.input, tt.pathID)
+			got, err := UnmarshalLUNLRI(tt.input, Options{PathID: tt.pathID, MultiLabel: base.MultiLabelConfirmed, IPv6: tt.ipv6})
 			if err != nil {
 				t.Fatalf("UnmarshalLUNLRI() error = %v", err)
 			}
@@ -508,7 +510,7 @@ func TestRFC8277_CompatibilityField(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalLUNLRI(tt.input, tt.pathID)
+			got, err := UnmarshalLUNLRI(tt.input, Options{PathID: tt.pathID, Withdraw: true})
 			if err != nil {
 				t.Fatalf("UnmarshalLUNLRI() error = %v", err)
 			}
@@ -525,6 +527,7 @@ func TestRFC8277_MultipleRoutes(t *testing.T) {
 		name   string
 		input  []byte
 		pathID bool
+		ipv6   bool
 		want   *base.MPNLRI
 	}{
 		{
@@ -608,6 +611,7 @@ func TestRFC8277_MultipleRoutes(t *testing.T) {
 		},
 		{
 			name: "Two IPv6 labeled routes",
+			ipv6: true,
 			input: []byte{
 				// Route 1: 2001:db8:1::/48
 				0x48,             // Length=72=24+48
@@ -642,7 +646,7 @@ func TestRFC8277_MultipleRoutes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalLUNLRI(tt.input, tt.pathID)
+			got, err := UnmarshalLUNLRI(tt.input, Options{PathID: tt.pathID, IPv6: tt.ipv6})
 			if err != nil {
 				t.Fatalf("UnmarshalLUNLRI() error = %v", err)
 			}
@@ -704,7 +708,7 @@ func TestRFC8277_ErrorCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalLUNLRI(tt.input, tt.pathID)
+			got, err := UnmarshalLUNLRI(tt.input, Options{PathID: tt.pathID})
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("UnmarshalLUNLRI() expected error, got nil (result: %+v)", got)
