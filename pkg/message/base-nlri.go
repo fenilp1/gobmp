@@ -30,7 +30,7 @@ func (p *producer) nlri(op int, ph *bmp.PerPeerHeader, update *bgp.Update) ([]*U
 		return nil, fmt.Errorf("unknown operation %d", op)
 	}
 	mp, err := base.UnmarshalRoutesWithState(field, pathIDs, false)
-	if err != nil {
+	if err = p.checkDecoded(ph, 1, 1, mp, err); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal routes from NLRI with error: %w", err)
 	}
 	routes = mp.NLRI

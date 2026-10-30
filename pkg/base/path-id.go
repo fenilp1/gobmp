@@ -31,7 +31,8 @@ func (s PathIDState) Expected() bool {
 // DecodeWithPathID calls parse with the Path Identifier setting of state s.
 // A present or absent state is parsed once. Otherwise a failed parse is
 // retried, once, with the setting flipped: the expected setting first, or
-// guess when s is unknown. The first error is returned.
+// guess when s is unknown. A result read with the setting opposite to an
+// expected one has PathIDsFlipped set. The first error is returned.
 func DecodeWithPathID(s PathIDState, guess bool, parse func(pathID bool) (*MPNLRI, error)) (*MPNLRI, error) {
 	switch s {
 	case PathIDPresent:
@@ -46,6 +47,7 @@ func DecodeWithPathID(s PathIDState, guess bool, parse func(pathID bool) (*MPNLR
 		return mp, nil
 	}
 	if mp, ferr := parse(!guess); ferr == nil {
+		mp.PathIDsFlipped = s != PathIDUnknown
 		return mp, nil
 	}
 	return nil, err

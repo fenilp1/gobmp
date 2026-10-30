@@ -3,7 +3,10 @@ package message
 import (
 	"crypto/md5"
 	"encoding/hex"
+	"fmt"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/golang/glog"
 	"github.com/sbezverk/gobmp/pkg/base"
@@ -142,6 +145,10 @@ type producer struct {
 	// bmp.PerPeerHeader.SessionKey, from its Peer Up to its Peer Down.
 	sessionLock sync.RWMutex
 	sessions    map[string]sessionState
+	// pathIDWarned holds when a Path ID flip was last logged per session
+	// and AFI/SAFI, to rate limit the warning.
+	pathIDWarnLock sync.Mutex
+	pathIDWarned   map[string]time.Time
 	// If splitAF is set to true, ipv4 and ipv6 messages will go into separate topics
 	splitAF bool
 	// collectorAdminID is the collector identifier string for OpenBMP binary header
@@ -340,9 +347,18 @@ func (p *producer) storeSession(ph *bmp.PerPeerHeader, s sessionState) {
 // the header.
 func (p *producer) deleteSession(ph *bmp.PerPeerHeader) {
 	key := ph.SessionKey()
-	p.sessionLock.Lock()
-	defer p.sessionLock.Unlock()
-	delete(p.sessions, key)
+	func() {
+		p.sessionLock.Lock()
+		defer p.sessionLock.Unlock()
+		delete(p.sessions, key)
+	}()
+	p.pathIDWarnLock.Lock()
+	defer p.pathIDWarnLock.Unlock()
+	for k := range p.pathIDWarned {
+		if strings.HasPrefix(k, key+"/") {
+			delete(p.pathIDWarned, k)
+		}
+	}
 }
 
 // session returns the state of the session a message with header ph belongs
@@ -376,6 +392,62 @@ func (p *producer) nlriStateFunc(ph *bmp.PerPeerHeader) bgp.NLRIState {
 	return func(nlriType int) (base.PathIDState, base.MultiLabel) {
 		return p.nlriState(ph, nlriType)
 	}
+}
+
+// pathIDWarnInterval is the least time between two warnings about Path ID
+// flips for one session and AFI/SAFI.
+const pathIDWarnInterval = time.Minute
+
+// nlriContext describes where NLRI of AFI afi SAFI safi in a message with
+// header ph come from, for logs.
+func nlriContext(ph *bmp.PerPeerHeader, afi uint16, safi uint8) string {
+	view := "Loc-RIB"
+	peer := "BGP ID " + ph.GetPeerBGPIDString()
+	if ph.PeerType != bmp.PeerType3 {
+		view = "Adj-RIB-In"
+		if out, _ := ph.IsAdjRIBOut(); out {
+			view = "Adj-RIB-Out"
+		}
+		if post, _ := ph.IsPostPolicy(); post {
+			view += " post-policy"
+		} else {
+			view += " pre-policy"
+		}
+		peer = ph.GetPeerAddrString()
+	}
+	return fmt.Sprintf("router %s peer %s distinguisher %s %s AFI/SAFI %d/%d",
+		ph.Identity.RouterIP, peer, ph.GetPeerDistinguisherString(), view, afi, safi)
+}
+
+// checkDecoded adds the session context to err, the error of decoding NLRI
+// of AFI afi SAFI safi in a message with header ph, and warns, rate limited,
+// when mp was read with the Path ID setting opposite to the expected one.
+func (p *producer) checkDecoded(ph *bmp.PerPeerHeader, afi uint16, safi uint8, mp *base.MPNLRI, err error) error {
+	if err != nil {
+		return fmt.Errorf("%s: %w", nlriContext(ph, afi, safi), err)
+	}
+	if mp == nil || !mp.PathIDsFlipped {
+		return nil
+	}
+	key := fmt.Sprintf("%s/%d/%d", ph.SessionKey(), afi, safi)
+	now := time.Now()
+	warn := func() bool {
+		p.pathIDWarnLock.Lock()
+		defer p.pathIDWarnLock.Unlock()
+		if last, ok := p.pathIDWarned[key]; ok && now.Sub(last) < pathIDWarnInterval {
+			return false
+		}
+		if p.pathIDWarned == nil {
+			p.pathIDWarned = make(map[string]time.Time)
+		}
+		p.pathIDWarned[key] = now
+		return true
+	}()
+	if warn {
+		glog.Warningf("%s: NLRI decoded with the ADD-PATH Path ID setting opposite to the negotiated one; further warnings for this session and AFI/SAFI suppressed for %s",
+			nlriContext(ph, afi, safi), pathIDWarnInterval)
+	}
+	return nil
 }
 
 // GetTableName returns the VRF/Table Name of the Loc-RIB instance a message

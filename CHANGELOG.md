@@ -14,6 +14,7 @@ Message updates and major project changes should be documented here.
   `base.UnmarshalRoutesWithState`, `unicast.UnmarshalUnicastNLRIWithState` and `multicast.UnmarshalMulticastNLRIWithState`;
   the ADD-PATH map and bool forms are kept, and the routes decoders also take the address family
 - `bmp.PerPeerHeader.SessionKey` identifies a monitored session: peer type, distinguisher and address (Loc-RIB: BGP ID)
+- `base.MPNLRI.PathIDsFlipped` reports NLRI read with the Path ID setting opposite to the expected one
 
 #### Changed
 
@@ -29,6 +30,8 @@ Message updates and major project changes should be documented here.
   Loc-RIB whenever the capability is present; a failed parse is still retried with the setting flipped
 - SAFI 1/2 and the NLRI and Withdrawn Routes fields drop prefixes over 32 bits (IPv4) or 128 (IPv6) as malformed
   (RFC 4271 §4.3, RFC 7606 §5.3) instead of capping IPv4 lengths at 32
+- NLRI decode errors are logged with router, peer, RIB view and AFI/SAFI, and NLRI read with the Path ID setting
+  opposite to the negotiated one log a warning, at most once a minute per session and AFI/SAFI
 
 #### Deprecated
 

@@ -10,6 +10,14 @@ import (
 	"github.com/sbezverk/gobmp/pkg/l3vpn"
 )
 
+// nlriAFI returns the AFI, 1 or 2, of IPv4 or IPv6 NLRI.
+func nlriAFI(nlri bgp.MPNLRI) uint16 {
+	if nlri.IsIPv6NLRI() {
+		return 2
+	}
+	return 1
+}
+
 // l3vpn process MP_REACH_NLRI AFI 1/2 SAFI 128 update message and returns
 // L3VPN prefix object.
 func (p *producer) l3vpn(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, update *bgp.Update) ([]L3VPNPrefix, error) {
@@ -24,6 +32,7 @@ func (p *producer) l3vpn(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, update 
 	}
 
 	nlril3vpn, err := nlri.GetNLRIL3VPN()
+	err = p.checkDecoded(ph, nlriAFI(nlri), 128, nlril3vpn, err)
 	if errors.Is(err, l3vpn.ErrEmptyNLRI) {
 		// Empty NLRI signals End-of-RIB per RFC 4724 §2 and is encoded as a withdrawal.
 		prfx := L3VPNPrefix{

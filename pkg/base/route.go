@@ -11,6 +11,9 @@ import (
 // MPNLRI defines a collection of Prefixes/Routes sent in NLRI of MP_REACH or MP_UNREACH attribute
 type MPNLRI struct {
 	NLRI []Route
+	// PathIDsFlipped is set when the NLRI were read with the Path ID
+	// setting opposite to the expected one; see DecodeWithPathID.
+	PathIDsFlipped bool
 }
 
 // Route defines a structure of NLRI prefix element

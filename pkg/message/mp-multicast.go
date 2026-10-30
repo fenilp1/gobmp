@@ -22,7 +22,7 @@ func (p *producer) multicast(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, upd
 
 	prfxs := make([]*MulticastPrefix, 0)
 	u, err := nlri.GetNLRIMulticast()
-	if err != nil {
+	if err = p.checkDecoded(ph, nlriAFI(nlri), 2, u, err); err != nil {
 		return nil, err
 	}
 
