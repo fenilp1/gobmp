@@ -158,6 +158,9 @@ type producer struct {
 	identityLock sync.RWMutex
 	identities   map[string]bmp.PeerIdentity
 	speakerID    bmp.PeerIdentity
+	// baseAttrsJSON is on while a Route Monitoring message is produced
+	// (see marshalMessage).
+	baseAttrsJSON baseAttrsCache
 }
 
 // Producer publishes one BMP connection's messages in input order.
