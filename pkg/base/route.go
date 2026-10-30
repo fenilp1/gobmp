@@ -43,7 +43,8 @@ func UnmarshalRoutes(b []byte, pathID bool) ([]Route, error) {
 // MP_UNREACH_NLRI, each preceded by a 4-octet ADD-PATH Path Identifier as
 // state s says (RFC 7911 §3; see DecodeWithPathID). A prefix longer than 32
 // bits, or 128 for ipv6, makes the field malformed (RFC 4271 §4.3, RFC 4760
-// §5, RFC 7606 §5.3), so no Path ID retry can turn it into an IPv4 /48.
+// §5, RFC 7606 §5.3), so a Path ID retry cannot read such a field as an
+// IPv4 /48; DecodeWithPathID rejects other implausible retry results.
 func UnmarshalRoutesWithState(b []byte, s PathIDState, ipv6 bool) (*MPNLRI, error) {
 	maxBits := 32
 	if ipv6 {

@@ -137,3 +137,37 @@ func TestDecodeErrorContext(t *testing.T) {
 		t.Errorf("checkDecoded() = %v, want %s", err, want)
 	}
 }
+
+// TestPathIDRetryPlausible checks that the retry of an expected Path ID
+// setting publishes no route made of a malformed field's octets.
+func TestPathIDRetryPlausible(t *testing.T) {
+	ph := globalHeader("192.0.2.1", "10.0.0.1")
+	tests := []struct {
+		name    string
+		addPath bool
+		nlri    []byte
+	}{
+		// A /40 IPv4 prefix: with Path IDs, Path ID 0x280a0000 and 0.0.0.0/1.
+		{name: "ADD-PATH off, /40", nlri: []byte{0x28, 0x0a, 0x00, 0x00, 0x01, 0x00}},
+		// Path ID 1 and 10.1.2.0/24, then one octet: without Path IDs,
+		// 0.0.0.0/0 three times among other routes.
+		{name: "ADD-PATH on, trailing octet", addPath: true, nlri: []byte{0x00, 0x00, 0x00, 0x01, 0x18, 0x0a, 0x01, 0x02, 0x00}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, field := range []string{"MP_REACH_NLRI", "NLRI field"} {
+				s := newSessionTest(t)
+				caps := bgp.Capability{}
+				if tt.addPath {
+					caps = addPathTestCaps(3, [2]byte{1, 1})
+				}
+				s.peerUp(ph, caps, caps)
+				update := plainTestUpdate(t, nil, tt.nlri)
+				if field == "MP_REACH_NLRI" {
+					update = testUpdate(t, mpTestAttr(0x0e, 1, 1, sessionV4NH, tt.nlri))
+				}
+				wantNoRoute(t, field, s.routes(ph, update))
+			}
+		})
+	}
+}

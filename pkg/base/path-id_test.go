@@ -37,3 +37,28 @@ func TestDecodeWithPathID(t *testing.T) {
 		})
 	}
 }
+
+// TestDecodeWithPathIDPlausible checks that the retry of an expected state
+// keeps only a plausible result, while an unknown state, as used by the
+// bool decoders, keeps any.
+func TestDecodeWithPathIDPlausible(t *testing.T) {
+	slash40 := []byte{0x28, 0x0a, 0x00, 0x00, 0x01, 0x00}                    // with Path IDs: 0x280a0000, 0.0.0.0/1
+	trailing := []byte{0x00, 0x00, 0x00, 0x01, 0x18, 0x0a, 0x01, 0x02, 0x00} // without: /0 routes among others
+	tests := []struct {
+		name string
+		b    []byte
+		s    PathIDState
+		ok   bool
+	}{
+		{name: "Path ID over 24 bits", b: slash40, s: PathIDExpectAbsent},
+		{name: "Length 0 among routes", b: trailing, s: PathIDExpectPresent},
+		{name: "Path ID over 24 bits, unknown", b: slash40, s: PathIDUnknown, ok: true},
+		{name: "plausible retry", b: []byte{0x00, 0x00, 0x00, 0x07, 0x20, 0x0a, 0x00, 0x00, 0x01}, s: PathIDExpectAbsent, ok: true},
+	}
+	for _, tt := range tests {
+		mp, err := UnmarshalRoutesWithState(tt.b, tt.s, false)
+		if (err == nil) != tt.ok || (err == nil && !mp.PathIDsFlipped && tt.s != PathIDUnknown) {
+			t.Errorf("%s: UnmarshalRoutesWithState() = %+v, %v, want a retried result %t", tt.name, mp, err, tt.ok)
+		}
+	}
+}

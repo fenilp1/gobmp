@@ -36,15 +36,29 @@ type Options struct {
 	// AFI is the address family, 1 or 2: the prefix after the RD may be up
 	// to 32 or 128 bits (RFC 8277 §2.2). Zero allows up to 128.
 	AFI uint16
+	// compatMarkers reads a label field of 0x800000 or 0x000000 as no
+	// label, for UnmarshalL3VPNNLRI; see isCompatMarker.
+	compatMarkers bool
 }
 
-// UnmarshalL3VPNNLRI parses announced VPNv4/VPNv6 NLRI; srv6 sets
-// Options.SRv6. It is UnmarshalL3VPNNLRIWithOptions with the Multiple Labels
-// Capability state unknown and no address family, so an MP_UNREACH_NLRI
-// field, whose Compatibility field is not a label, should be decoded with
-// Options.Withdraw instead.
+// isCompatMarker reports whether the label field at the start of b is
+// 0x800000 or 0x000000. UnmarshalL3VPNNLRI, which is not told whether it
+// decodes an MP_REACH_NLRI or MP_UNREACH_NLRI field, reads these as the
+// withdrawal Compatibility field (RFC 8277 §2.4), as it always did. On an
+// announcement they would be a single label with S=0, which RFC 8277 §2.2
+// does not allow ("MUST be set to one on transmission").
+func isCompatMarker(b []byte) bool {
+	return len(b) >= 3 && (b[0] == 0x80 || b[0] == 0x00) && b[1] == 0x00 && b[2] == 0x00
+}
+
+// UnmarshalL3VPNNLRI parses VPNv4/VPNv6 NLRI of an MP_REACH_NLRI or
+// MP_UNREACH_NLRI field; srv6 sets Options.SRv6. It is
+// UnmarshalL3VPNNLRIWithOptions with the Multiple Labels Capability state
+// unknown and no address family, except that, not knowing the direction, it
+// reads a label field of 0x800000 or 0x000000 as the Compatibility field
+// (RFC 8277 §2.4), as before.
 func UnmarshalL3VPNNLRI(b []byte, pathID bool, srv6 ...bool) (*base.MPNLRI, error) {
-	return UnmarshalL3VPNNLRIWithOptions(b, Options{PathID: pathID, SRv6: len(srv6) == 1 && srv6[0]})
+	return UnmarshalL3VPNNLRIWithOptions(b, Options{PathID: pathID, SRv6: len(srv6) == 1 && srv6[0], compatMarkers: true})
 }
 
 // UnmarshalL3VPNNLRIWithOptions parses VPNv4/VPNv6 NLRI according to opts.
@@ -111,6 +125,9 @@ func parseL3VPNNLRI(b []byte, opts Options, f base.LabelField) (*base.MPNLRI, er
 
 		// Labels, or the Compatibility field of a withdrawal (RFC 8277 §2.4)
 		labels, n, err := base.ReadLabelField(b[p:], f)
+		if opts.compatMarkers && f != base.CompatibilityField && isCompatMarker(b[p:]) {
+			labels, n, err = nil, 3, nil
+		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse label field at pos %d: %w", p, err)
 		}

@@ -205,7 +205,9 @@ func TestPathIDDirection(t *testing.T) {
 // TestMalformedNLRIPathIDRetry checks the retry with the Path ID flag
 // flipped, whether the Peer Up says ADD-PATH is off or no Peer Up was seen:
 // it reads a field encoded with Path IDs, while a field malformed both ways
-// is dropped (RFC 7606 §5.3).
+// is dropped (RFC 7606 §5.3). With ADD-PATH off the retry's result must also
+// be plausible (base.DecodeWithPathID); with no Peer Up L3VPN retries as it
+// always did.
 func TestMalformedNLRIPathIDRetry(t *testing.T) {
 	// Without Path IDs: 0.62.129.48/32, 0.0.0.0/0, then a 62-bit prefix.
 	// With Path IDs: Path ID 0x20003e81 and a 48-bit prefix. Both readings
@@ -220,16 +222,17 @@ func TestMalformedNLRIPathIDRetry(t *testing.T) {
 	tests := []struct {
 		name   string
 		update func(t *testing.T) *bgp.Update
-		// Path ID of the one route published, 0 for none.
-		pathID int32
+		// Path ID of the one route published with no Peer Up and with
+		// ADD-PATH off, 0 for none.
+		pathID, offPathID int32
 	}{
 		{name: "SAFI 1", update: func(t *testing.T) *bgp.Update { return testUpdate(t, mpTestAttr(0x0e, 1, 1, sessionV4NH, repro)) }},
 		{name: "SAFI 1 withdraw", update: func(t *testing.T) *bgp.Update { return testUpdate(t, mpTestAttr(0x0f, 1, 1, nil, repro)) }},
 		{name: "NLRI field", update: func(t *testing.T) *bgp.Update { return plainTestUpdate(t, nil, repro) }},
 		{name: "SAFI 1 Path ID", update: func(t *testing.T) *bgp.Update {
 			return testUpdate(t, mpTestAttr(0x0e, 1, 1, sessionV4NH, withID))
-		}, pathID: 0xff},
-		{name: "NLRI field Path ID", update: func(t *testing.T) *bgp.Update { return plainTestUpdate(t, nil, withID) }, pathID: 0xff},
+		}, pathID: 0xff, offPathID: 0xff},
+		{name: "NLRI field Path ID", update: func(t *testing.T) *bgp.Update { return plainTestUpdate(t, nil, withID) }, pathID: 0xff, offPathID: 0xff},
 		{name: "L3VPN", update: func(t *testing.T) *bgp.Update {
 			return testUpdate(t, mpTestAttr(0x0e, 1, 128, sessionV4NH, vpnRepro), testRT)
 		}, pathID: 0x20003e81},
@@ -247,10 +250,14 @@ func TestMalformedNLRIPathIDRetry(t *testing.T) {
 					s.peerUp(ph, bgp.Capability{}, bgp.Capability{})
 				}
 				routes := s.routes(ph, tt.update(t))
-				if tt.pathID == 0 {
+				want := tt.pathID
+				if peerUp {
+					want = tt.offPathID
+				}
+				if want == 0 {
 					wantNoRoute(t, tt.name, routes)
-				} else if len(routes) != 1 || routes[0].PathID != tt.pathID {
-					t.Errorf("published %+v, want one route with Path ID %#x", routes, tt.pathID)
+				} else if len(routes) != 1 || routes[0].PathID != want {
+					t.Errorf("published %+v, want one route with Path ID %#x", routes, want)
 				}
 			})
 		}
