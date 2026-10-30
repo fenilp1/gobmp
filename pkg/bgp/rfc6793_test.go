@@ -676,3 +676,30 @@ func TestMergeAS4PathDoesNotAlias(t *testing.T) {
 		t.Errorf("AS_PATH segment's array modified: %v", spare)
 	}
 }
+
+// RFC 6368 Section 5: AS_PATH inside ATTR_SET is always 4-octet.
+func TestUnmarshalAttrSet_FourOctetASPath(t *testing.T) {
+	originAS := []byte{0, 0, 0xFD, 0xE8}
+	t.Run("4-octet AS_PATH, AS4_PATH ignored", func(t *testing.T) {
+		as, err := UnmarshalAttrSet(concat(originAS,
+			pathAttr(2, seg4(asSequence, 100, 200)),
+			pathAttr(17, seg4(asSequence, 70000)),
+		))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got, want := as.PathAttributes.ASPath, []uint32{100, 200}; !reflect.DeepEqual(got, want) {
+			t.Errorf("ASPath = %v, want %v", got, want)
+		}
+	})
+	t.Run("2-octet AS_PATH rejected", func(t *testing.T) {
+		// Parses only with 2-octet ASNs; it was decoded as [100, 70000].
+		as, err := UnmarshalAttrSet(concat(originAS,
+			pathAttr(2, seg2(asSequence, 100, ASTrans)),
+			pathAttr(17, seg4(asSequence, 70000)),
+		))
+		if err == nil {
+			t.Errorf("got %+v, want error", as.PathAttributes)
+		}
+	})
+}

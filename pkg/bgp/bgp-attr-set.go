@@ -100,7 +100,10 @@ func UnmarshalAttrSet(b []byte) (*AttrSet, error) {
 		}
 	}
 
-	baseAttrs, err := unmarshalBaseAttrsFromSlice(attrs, nil)
+	// RFC 6368 Section 5: the embedded AS_PATH and AGGREGATOR "MUST be
+	// encoded using 4-octet AS numbers".
+	as4 := true
+	baseAttrs, err := unmarshalBaseAttrsFromSlice(attrs, &as4)
 	if err != nil {
 		return nil, fmt.Errorf("ATTR_SET: failed to build BaseAttributes from embedded attributes: %w", err)
 	}

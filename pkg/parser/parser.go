@@ -2,6 +2,8 @@ package parser
 
 import (
 	"errors"
+	"sync"
+	"time"
 
 	"github.com/golang/glog"
 	"github.com/sbezverk/gobmp/pkg/bmp"
@@ -23,6 +25,9 @@ type parser struct {
 	producerQueue chan bmp.Message
 	stop          chan struct{}
 	config        *Config
+	// locRIB2OctetWarning rate-limits warnings about 2-octet Loc-RIB AS_PATHs
+	// from this BMP connection.
+	locRIB2OctetWarning rateLimitedWarning
 }
 
 // NewParser creates a new parser instance with the given configuration.
@@ -123,17 +128,9 @@ func (p *parser) parsingWorker(b []byte) {
 				return
 			}
 			perPerHeaderLen = bmp.PerPeerHeaderLength
-			// Pass the interpreted 4-byte-ASN setting derived from the BMP per-peer
-			// header per RFC 7854 §4.2 so AS_PATH width is authoritative rather than
-			// heuristic. Is4ByteASN returns an error for PeerType3 — fall back to
-			// the heuristic in that case via the no-hint variant.
 			rmBody := b[pos+perPerHeaderLen : pos+msgLen-bmp.CommonHeaderLength]
 			var rm *bmp.RouteMonitor
-			if is4, e := bmpMsg.PeerHeader.Is4ByteASN(); e == nil {
-				rm, err = bmp.UnmarshalBMPRouteMonitorMessageWithAS4Hint(rmBody, is4)
-			} else {
-				rm, err = bmp.UnmarshalBMPRouteMonitorMessage(rmBody)
-			}
+			rm, err = p.unmarshalRouteMonitor(rmBody, bmpMsg.PeerHeader)
 			if err != nil {
 				if errors.Is(err, bmp.ErrNotAnUpdate) {
 					glog.V(5).Infof("skipping non-Update BGP message in route monitor: %+v", err)
@@ -274,4 +271,68 @@ func (p *parser) sendRawMessage(b []byte) {
 			return
 		}
 	}
+}
+
+// unmarshalRouteMonitor decodes a Route Monitoring message body with the
+// AS_PATH width the per-peer header A flag gives (RFC 7854 Section 4.2).
+//
+// Loc-RIB has no A flag and "MUST use a 4-byte ASN encoding" (RFC 9069
+// Section 5.4.1), but some speakers (FRR up to 10.5) send the 2-octet
+// AS_PATH and AS4_PATH of the route's source peer. An AS_PATH that does
+// not decode with 4-octet ASNs is decoded with 2-octet ones, and then merged
+// with AS4_PATH (RFC 6793 Section 4.2.3).
+func (p *parser) unmarshalRouteMonitor(b []byte, ph *bmp.PerPeerHeader) (*bmp.RouteMonitor, error) {
+	is4, err := ph.Is4ByteASN()
+	if !errors.Is(err, bmp.ErrInvFlagRequestForPeerType) {
+		return bmp.UnmarshalBMPRouteMonitorMessageWithAS4Hint(b, is4)
+	}
+	rm, err := bmp.UnmarshalBMPRouteMonitorMessageWithAS4Hint(b, true)
+	if err == nil || errors.Is(err, bmp.ErrNotAnUpdate) {
+		return rm, err
+	}
+	// Without a hint, the AS_PATH width heuristic tries 4 octets, then 2.
+	rm2, err2 := bmp.UnmarshalBMPRouteMonitorMessage(b)
+	if err2 != nil {
+		return nil, err
+	}
+	p.locRIB2OctetWarning.warningf("BMP speaker %s: Loc-RIB Route Monitoring for BGP ID %s, distinguisher %s has a 2-octet AS_PATH, which RFC 9069 Section 5.4.1 does not allow; decoded with 2-octet ASNs",
+		p.config.SpeakerIP, ph.GetPeerBGPIDString(), ph.GetPeerDistinguisherString())
+	return rm2, nil
+}
+
+// warningInterval is the least time between two warnings of a
+// rateLimitedWarning.
+const warningInterval = time.Minute
+
+// rateLimitedWarning logs at most one warning per warningInterval and counts
+// the warnings it suppresses. The zero value is ready to use.
+type rateLimitedWarning struct {
+	mu         sync.Mutex
+	last       time.Time
+	suppressed int
+}
+
+// warningf logs the warning unless one was logged within warningInterval,
+// and reports whether it logged it.
+func (w *rateLimitedWarning) warningf(format string, args ...any) bool {
+	return w.warningfAt(time.Now(), format, args...)
+}
+
+// warningfAt is warningf at time t.
+func (w *rateLimitedWarning) warningfAt(t time.Time, format string, args ...any) bool {
+	w.mu.Lock()
+	if !w.last.IsZero() && t.Sub(w.last) < warningInterval {
+		w.suppressed++
+		w.mu.Unlock()
+		return false
+	}
+	n := w.suppressed
+	w.last, w.suppressed = t, 0
+	w.mu.Unlock()
+	if n > 0 {
+		format += " (%d similar warnings suppressed)"
+		args = append(args, n)
+	}
+	glog.Warningf(format, args...)
+	return true
 }
