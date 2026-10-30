@@ -2,39 +2,13 @@ package message
 
 import (
 	"bytes"
-	"encoding/binary"
 	"encoding/json"
 	"testing"
 
 	"github.com/sbezverk/gobmp/pkg/bgp"
 	"github.com/sbezverk/gobmp/pkg/bmp"
+	"github.com/sbezverk/gobmp/pkg/internal/fuzzseed"
 )
-
-var bgpMarker = []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
-
-// testPeerUpBody encodes a BMP Peer Up body (after the per-peer header) with
-// open as both the sent and the received OPEN.
-func testPeerUpBody(open []byte) []byte {
-	b := []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 192, 0, 2, 2, 0, 179, 0x9c, 0x40}
-	b = append(append(b, bgpMarker...), open...)
-	return append(append(b, bgpMarker...), open...)
-}
-
-// testAttr encodes a BGP path attribute using the extended length format.
-func testAttr(flags, typ byte, v []byte) []byte {
-	b := []byte{flags | 0x10, typ, 0, 0}
-	binary.BigEndian.PutUint16(b[2:], uint16(len(v)))
-	return append(b, v...)
-}
-
-// testUpdate encodes a BGP UPDATE carrying attrs and no withdrawn routes.
-func testUpdate(attrs []byte) []byte {
-	b := append([]byte(nil), bgpMarker...)
-	b = binary.BigEndian.AppendUint16(b, uint16(19+4+len(attrs)))
-	b = append(b, 2, 0, 0)
-	b = binary.BigEndian.AppendUint16(b, uint16(len(attrs)))
-	return append(b, attrs...)
-}
 
 // A PeerUp whose OPENs carry a malformed 4-octet AS capability (RFC 6793 §3)
 // must still be published, fall back to My AS, and set up the per-table
@@ -48,7 +22,7 @@ func TestPeerUpWithMalformedCap65KeepsAddPath(t *testing.T) {
 			opt := append(append([]byte(nil), cap65...),
 				0x02, 0x06, 0x45, 0x04, 0x00, 0x02, 0x01, 0x03) // ADD-PATH IPv6 unicast, send/receive
 			open := append([]byte{0, byte(29 + len(opt)), 1, 4, 0xfd, 0xe8, 0, 0xb4, 192, 0, 2, 1, byte(len(opt))}, opt...)
-			pu, err := bmp.UnmarshalPeerUpMessage(testPeerUpBody(open), false)
+			pu, err := bmp.UnmarshalPeerUpMessage(fuzzseed.PeerUpBody(open), false)
 			if err != nil {
 				t.Fatalf("UnmarshalPeerUpMessage: %v", err)
 			}
@@ -76,8 +50,8 @@ func TestPeerUpWithMalformedCap65KeepsAddPath(t *testing.T) {
 			// MP_REACH_NLRI IPv6 unicast with Path ID 7 for 2001:db8::/32.
 			reach := []byte{0, 2, 1, 16, 0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0,
 				0, 0, 0, 7, 32, 0x20, 0x01, 0x0d, 0xb8}
-			attrs := append([]byte{0x40, 1, 1, 0, 0x40, 2, 0}, testAttr(0x80, 14, reach)...)
-			rm, err := bmp.UnmarshalBMPRouteMonitorMessage(testUpdate(attrs))
+			attrs := append([]byte{0x40, 1, 1, 0, 0x40, 2, 0}, fuzzseed.Attr(0x80, 14, reach)...)
+			rm, err := bmp.UnmarshalBMPRouteMonitorMessage(fuzzseed.Message(2, fuzzseed.UpdateBody(attrs, nil)))
 			if err != nil {
 				t.Fatalf("UnmarshalBMPRouteMonitorMessage: %v", err)
 			}
@@ -108,7 +82,7 @@ func TestPeerUpWithMalformedCap1And9KeepsThemVisible(t *testing.T) {
 		0x02, 0x06, 0x45, 0x04, 0x00, 0x02, 0x01, 0x03, // ADD-PATH IPv6 unicast, send/receive
 	}
 	open := append([]byte{0, byte(29 + len(opt)), 1, 4, 0xfd, 0xe8, 0, 0xb4, 192, 0, 2, 1, byte(len(opt))}, opt...)
-	pu, err := bmp.UnmarshalPeerUpMessage(testPeerUpBody(open), false)
+	pu, err := bmp.UnmarshalPeerUpMessage(fuzzseed.PeerUpBody(open), false)
 	if err != nil {
 		t.Fatalf("UnmarshalPeerUpMessage: %v", err)
 	}
