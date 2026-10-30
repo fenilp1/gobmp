@@ -10,6 +10,10 @@ Message updates and major project changes should be documented here.
 
 - `BaseAttributes.OriginAS` returning the Route Origin ASN per RFC 6811 Section 2, `PeerIdentity.LocalAS` holding the monitored router's AS from the Peer Up Sent OPEN, and the `bgp.ASTrans` constant
 
+#### Changed
+
+- A path attribute repeated in an UPDATE keeps only its first occurrence per RFC 7606 Section 3(g), except MP_REACH_NLRI and MP_UNREACH_NLRI: `community_list` and the other attribute fields now come from the first occurrence instead of the last, and `base_attr_hash` of such UPDATEs changes as the repeats are no longer hashed
+
 #### Fixed
 
 - `as_path`, `as_path_segments` and `origin_as` of routes from 2-octet AS sessions show the real 4-byte ASNs from AS4_PATH instead of 23456 (AS_TRANS): AS_PATH and AS4_PATH are merged per RFC 6793 Section 4.2.3, adjacent AS_SEQUENCE segments of the merged path are joined (at most 255 ASNs each) and `as_path_count` counts the merged `as_path`

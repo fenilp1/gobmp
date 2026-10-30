@@ -49,8 +49,9 @@ func unmarshalBGPPathAttributes(b []byte, as4hint *bool) ([]PathAttribute, *Base
 }
 
 // unmarshalRawPathAttributes decodes the TLV-encoded path attributes from a
-// raw byte buffer into a []PathAttribute slice without any semantic
-// interpretation. This is the low-level parser used by both
+// raw byte buffer into a []PathAttribute slice. Apart from discarding
+// repeated attributes, it does no semantic interpretation. This is the
+// low-level parser used by both
 // UnmarshalBGPPathAttributes (top-level UPDATE) and UnmarshalAttrSet (embedded
 // attributes inside ATTR_SET) so that forbidden-type checks can run before
 // semantic mapping triggers recursion.
@@ -59,6 +60,7 @@ func unmarshalRawPathAttributes(b []byte) ([]PathAttribute, error) {
 		glog.Infof("BGPPathAttributes Raw: %s", tools.MessageHex(b))
 	}
 	attrs := make([]PathAttribute, 0, 8)
+	var seen [256]bool
 
 	for p := 0; p < len(b); {
 		// Need at least flag + type (2 bytes) before reading anything.
@@ -86,6 +88,18 @@ func unmarshalRawPathAttributes(b []byte) ([]PathAttribute, error) {
 		if p+int(l) > len(b) {
 			return nil, fmt.Errorf("truncated path attribute value at offset %d: need %d bytes, have %d", p, l, len(b)-p)
 		}
+		// RFC 7606 Section 3(g): all occurrences of a repeated attribute other
+		// than the first are discarded, except MP_REACH_NLRI and
+		// MP_UNREACH_NLRI, whose repetition calls for a session reset that
+		// is the monitored router's to perform.
+		if seen[t] && t != MP_REACH_NLRI && t != MP_UNREACH_NLRI {
+			if glog.V(5) {
+				glog.Infof("discarding repeated path attribute type %d at offset %d", t, p)
+			}
+			p += int(l)
+			continue
+		}
+		seen[t] = true
 		pa := PathAttribute{
 			AttributeTypeFlags: f,
 			AttributeType:      t,
