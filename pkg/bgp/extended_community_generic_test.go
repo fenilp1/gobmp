@@ -97,3 +97,28 @@ func TestGenericTransitivePart2Part3SubTypes(t *testing.T) {
 		}
 	}
 }
+
+// TestFlowspecTrafficRateBytes: RFC 8955 Section 7.1 says negative
+// traffic-rate-bytes values MUST be treated as zero; non-negative values keep
+// their existing rendering (bytes per second times 8, as bps).
+func TestFlowspecTrafficRateBytes(t *testing.T) {
+	tests := []struct {
+		input  []byte
+		expect string
+	}{
+		{[]byte{0x80, 0x06, 0xfd, 0xe8, 0x44, 0x7a, 0x00, 0x00}, "flowspec-traffic-rate=AS: 65000 Rate: 8000 bps"}, // 1000 B/s
+		{[]byte{0x80, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, "flowspec-traffic-rate=AS: 0 Rate: 0 bps"},
+		{[]byte{0x80, 0x06, 0x00, 0x00, 0xc4, 0x7a, 0x00, 0x00}, "flowspec-traffic-rate=AS: 0 Rate: 0 bps"}, // -1000
+		{[]byte{0x80, 0x06, 0x00, 0x00, 0xbf, 0x80, 0x00, 0x00}, "flowspec-traffic-rate=AS: 0 Rate: 0 bps"}, // -1
+		{[]byte{0x80, 0x06, 0x00, 0x00, 0x7f, 0xc0, 0x00, 0x00}, "flowspec-traffic-rate=AS: 0 Rate: 0 bps"}, // NaN
+	}
+	for _, tt := range tests {
+		ext, err := makeExtCommunity(tt.input)
+		if err != nil {
+			t.Fatalf("makeExtCommunity(% x) error = %v", tt.input, err)
+		}
+		if got := ext.String(); got != tt.expect {
+			t.Errorf("% x: got %s, want %s", tt.input, got, tt.expect)
+		}
+	}
+}
