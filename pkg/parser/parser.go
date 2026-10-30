@@ -25,9 +25,11 @@ type parser struct {
 	producerQueue chan bmp.Message
 	stop          chan struct{}
 	config        *Config
-	// locRIB2OctetWarning rate-limits warnings about 2-octet Loc-RIB AS_PATHs
-	// from this BMP connection.
+	// locRIB2OctetWarning and aFlag2OctetWarning rate-limit warnings about
+	// 2-octet AS_PATHs from this BMP connection in Loc-RIB and with the A
+	// flag 0.
 	locRIB2OctetWarning rateLimitedWarning
+	aFlag2OctetWarning  rateLimitedWarning
 }
 
 // NewParser creates a new parser instance with the given configuration.
@@ -277,17 +279,19 @@ func (p *parser) sendRawMessage(b []byte) {
 // AS_PATH width the per-peer header A flag gives (RFC 7854 Section 4.2).
 //
 // Loc-RIB has no A flag and "MUST use a 4-byte ASN encoding" (RFC 9069
-// Section 5.4.1), but some speakers (FRR up to 10.5) send the 2-octet
-// AS_PATH and AS4_PATH of the route's source peer. An AS_PATH that does
-// not decode with 4-octet ASNs is decoded with 2-octet ones, and then merged
-// with AS4_PATH (RFC 6793 Section 4.2.3).
+// Section 5.4.1). Some speakers (FRR up to 10.5) still send the 2-octet
+// AS_PATH and AS4_PATH of a 2-octet peer, in Loc-RIB and with the A flag 0.
+// An AS_PATH meant to be 4-byte that does not decode with 4-octet ASNs is
+// decoded with 2-octet ones, and then merged with AS4_PATH (RFC 6793 Section
+// 4.2.3).
 func (p *parser) unmarshalRouteMonitor(b []byte, ph *bmp.PerPeerHeader) (*bmp.RouteMonitor, error) {
 	is4, err := ph.Is4ByteASN()
-	if !errors.Is(err, bmp.ErrInvFlagRequestForPeerType) {
-		return bmp.UnmarshalBMPRouteMonitorMessageWithAS4Hint(b, is4)
+	locRIB := errors.Is(err, bmp.ErrInvFlagRequestForPeerType)
+	if locRIB {
+		is4 = true
 	}
-	rm, err := bmp.UnmarshalBMPRouteMonitorMessageWithAS4Hint(b, true)
-	if err == nil || errors.Is(err, bmp.ErrNotAnUpdate) {
+	rm, err := bmp.UnmarshalBMPRouteMonitorMessageWithAS4Hint(b, is4)
+	if !is4 || err == nil || errors.Is(err, bmp.ErrNotAnUpdate) {
 		return rm, err
 	}
 	// Without a hint, the AS_PATH width heuristic tries 4 octets, then 2.
@@ -295,8 +299,13 @@ func (p *parser) unmarshalRouteMonitor(b []byte, ph *bmp.PerPeerHeader) (*bmp.Ro
 	if err2 != nil {
 		return nil, err
 	}
-	p.locRIB2OctetWarning.warningf("BMP speaker %s: Loc-RIB Route Monitoring for BGP ID %s, distinguisher %s has a 2-octet AS_PATH, which RFC 9069 Section 5.4.1 does not allow; decoded with 2-octet ASNs",
-		p.config.SpeakerIP, ph.GetPeerBGPIDString(), ph.GetPeerDistinguisherString())
+	if locRIB {
+		p.locRIB2OctetWarning.warningf("BMP speaker %s: Loc-RIB Route Monitoring for BGP ID %s, distinguisher %s has a 2-octet AS_PATH, which RFC 9069 Section 5.4.1 does not allow; decoded with 2-octet ASNs",
+			p.config.SpeakerIP, ph.GetPeerBGPIDString(), ph.GetPeerDistinguisherString())
+	} else {
+		p.aFlag2OctetWarning.warningf("BMP speaker %s: Route Monitoring for peer %s AS %d has a 2-octet AS_PATH although its per-peer header A flag is 0 (4-byte AS_PATH, RFC 7854 Section 4.2); decoded with 2-octet ASNs",
+			p.config.SpeakerIP, ph.GetPeerAddrString(), ph.PeerAS)
+	}
 	return rm2, nil
 }
 

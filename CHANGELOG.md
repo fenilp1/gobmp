@@ -21,6 +21,7 @@ Message updates and major project changes should be documented here.
 - Withdrawn routes omit `origin_as` instead of taking it from the AS path of the routes announced in the same UPDATE
 - The AS_PATH inside ATTR_SET is decoded with 4-octet ASNs per RFC 6368 Section 5 instead of guessing the width, so one that parses only with 2-octet ASNs is rejected as malformed and `attr_set` omitted
 - Loc-RIB Route Monitoring AS_PATH is decoded with 4-octet ASNs per RFC 9069 Section 5.4.1 when it parses so, else with 2-octet ASNs (as FRR up to 10.5 sends) with a rate-limited warning, and is then merged with AS4_PATH, so such Loc-RIB routes show the real 4-byte ASNs instead of 23456
+- Adj-RIB-In and Adj-RIB-Out Route Monitoring with the per-peer header A flag 0 (4-byte AS_PATH per RFC 7854 Section 4.2) whose AS_PATH does not parse with 4-octet ASNs, as FRR up to 10.5 sends for 2-octet peers, is decoded with 2-octet ASNs and merged with AS4_PATH, with a rate-limited warning, instead of being dropped
 
 ### 2026-03-01
 
