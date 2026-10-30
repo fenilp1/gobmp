@@ -7,6 +7,7 @@ import (
 	"github.com/sbezverk/gobmp/pkg/base"
 	"github.com/sbezverk/gobmp/pkg/bgp"
 	"github.com/sbezverk/gobmp/pkg/bmp"
+	"github.com/sbezverk/gobmp/pkg/prefixsid"
 )
 
 // unicast process nlri 14 afi 1/2 safi 1 messages and generates UnicastPrefix messages
@@ -69,6 +70,13 @@ func (p *producer) unicast(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, updat
 			prfx.TableName = p.GetTableName(ph)
 		}
 		return []*UnicastPrefix{prfx}, nil
+	}
+	// Some Label Unicast may carry BGP Attribute 40 (Prefix SID), the same
+	// for all routes of the UPDATE.
+	var psid *prefixsid.PSid
+	var psidErr error
+	if label {
+		psid, psidErr = update.GetAttrPrefixSID()
 	}
 	for _, e := range u.NLRI {
 		prfx := &UnicastPrefix{
@@ -135,8 +143,7 @@ func (p *producer) unicast(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, updat
 			for _, l := range e.Label {
 				prfx.Labels = append(prfx.Labels, l.Value)
 			}
-			// Some Label Unicast may carry BGP Attribute 40 (Prefix SID)
-			if psid, err := update.GetAttrPrefixSID(); err == nil {
+			if psidErr == nil {
 				prfx.PrefixSID = psid
 			}
 		}

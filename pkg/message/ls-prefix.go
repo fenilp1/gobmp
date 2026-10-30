@@ -6,10 +6,84 @@ import (
 
 	"github.com/sbezverk/gobmp/pkg/base"
 	"github.com/sbezverk/gobmp/pkg/bgp"
+	"github.com/sbezverk/gobmp/pkg/bgpls"
 	"github.com/sbezverk/gobmp/pkg/bmp"
+	"github.com/sbezverk/gobmp/pkg/srv6"
 )
 
+// lsPrefixAttrs holds what the BGP-LS Attribute (RFC 9552 §5.3) of an UPDATE
+// gives the Prefix NLRI it carries, so it is decoded once for all of them.
+type lsPrefixAttrs struct {
+	decoded bool
+	attr    *bgpls.NLRI
+	err     error
+
+	routerID       string
+	metric         uint32
+	routeTag       []uint32
+	igpFlags       *bgpls.IGPFlags
+	extRouteTag    []uint64
+	flexAlgo       []*bgpls.FlexAlgoPrefixMetric
+	flexAlgoOK     bool
+	srv6Locator    *srv6.LocatorTLV
+	srv6LocatorOK  bool
+	opaque         []string
+	attrTLVsProto  base.ProtoID
+	attrTLVs       *bgpls.PrefixAttrTLVs
+	attrTLVsErr    error
+	attrTLVsCached bool
+}
+
+// get decodes the attribute of update the first time.
+func (a *lsPrefixAttrs) get(update *bgp.Update) {
+	if a.decoded {
+		return
+	}
+	a.decoded = true
+	a.attr, a.err = update.GetBGPLSAttribute()
+	if a.err != nil {
+		return
+	}
+	ls := a.attr
+	// The router-ID TLV (RFC 9552 Section 5.3.1.4, TLV 1028/1029) is
+	// chosen by which TLV is present, not by the prefix NLRI type.
+	// Prefer IPv4, fall back to IPv6.
+	a.routerID = ls.GetLocalIPv4RouterID()
+	if a.routerID == "" {
+		a.routerID = ls.GetLocalIPv6RouterID()
+	}
+	a.metric = ls.GetPrefixMetric()
+	a.routeTag = ls.GetPrefixIGPRouteTag()
+	if f, err := ls.GetPrefixIGPFlags(); err == nil {
+		a.igpFlags = f
+	}
+	a.extRouteTag = ls.GetPrefixIGPExtRouteTag()
+	if fap, err := ls.GetFlexAlgoPrefixMetric(); err == nil {
+		a.flexAlgo, a.flexAlgoOK = fap, true
+	}
+	if loc, err := ls.GetLSSRv6Locator(); err == nil {
+		a.srv6Locator, a.srv6LocatorOK = loc, true
+	}
+	a.opaque = ls.GetOpaquePrefixAttribute()
+}
+
+// prefixAttrTLVs returns the Prefix Attribute TLVs for protocol proto, which
+// their decoding depends on.
+func (a *lsPrefixAttrs) prefixAttrTLVs(proto base.ProtoID) (*bgpls.PrefixAttrTLVs, error) {
+	if !a.attrTLVsCached || a.attrTLVsProto != proto {
+		a.attrTLVs, a.attrTLVsErr = a.attr.GetPrefixAttrTLVs(proto)
+		a.attrTLVsProto, a.attrTLVsCached = proto, true
+	}
+	return a.attrTLVs, a.attrTLVsErr
+}
+
 func (p *producer) lsPrefix(prfx *base.PrefixNLRI, nextHop string, op int, ph *bmp.PerPeerHeader, update *bgp.Update, ipv4 bool) (*LSPrefix, error) {
+	return p.lsPrefixShared(prfx, nextHop, op, ph, update, ipv4, &lsPrefixAttrs{})
+}
+
+// lsPrefixShared is lsPrefix with the decoded BGP-LS Attribute of update in
+// attrs, which the Prefix NLRI of one UPDATE share.
+func (p *producer) lsPrefixShared(prfx *base.PrefixNLRI, nextHop string, op int, ph *bmp.PerPeerHeader, update *bgp.Update, ipv4 bool, attrs *lsPrefixAttrs) (*LSPrefix, error) {
 	var operation string
 	switch op {
 	case 0:
@@ -90,31 +164,25 @@ func (p *producer) lsPrefix(prfx *base.PrefixNLRI, nextHop string, op int, ph *b
 	default:
 		msg.AreaID = "0"
 	}
-	lsprefix, err := update.GetBGPLSAttribute()
-	if err == nil {
-		// The router-ID TLV (RFC 9552 Section 5.3.1.4, TLV 1028/1029) is
-		// chosen by which TLV is present, not by the prefix NLRI type.
-		// Prefer IPv4, fall back to IPv6.
-		msg.RouterID = lsprefix.GetLocalIPv4RouterID()
-		if msg.RouterID == "" {
-			msg.RouterID = lsprefix.GetLocalIPv6RouterID()
+	attrs.get(update)
+	if attrs.err == nil {
+		msg.RouterID = attrs.routerID
+		msg.PrefixMetric = attrs.metric
+		msg.IGPRouteTag = attrs.routeTag
+		if attrs.igpFlags != nil {
+			msg.IGPFlags = attrs.igpFlags
 		}
-		msg.PrefixMetric = lsprefix.GetPrefixMetric()
-		msg.IGPRouteTag = lsprefix.GetPrefixIGPRouteTag()
-		if f, err := lsprefix.GetPrefixIGPFlags(); err == nil {
-			msg.IGPFlags = f
-		}
-		msg.IGPExtRouteTag = lsprefix.GetPrefixIGPExtRouteTag()
-		if s, err := lsprefix.GetPrefixAttrTLVs(prfx.ProtocolID); err == nil {
+		msg.IGPExtRouteTag = attrs.extRouteTag
+		if s, err := attrs.prefixAttrTLVs(prfx.ProtocolID); err == nil {
 			msg.PrefixAttrTLVs = s
 		}
-		if fap, err := lsprefix.GetFlexAlgoPrefixMetric(); err == nil {
-			msg.FlexAlgoPrefixMetric = fap
+		if attrs.flexAlgoOK {
+			msg.FlexAlgoPrefixMetric = attrs.flexAlgo
 		}
-		if loc, err := lsprefix.GetLSSRv6Locator(); err == nil {
-			msg.SRv6Locator = loc
+		if attrs.srv6LocatorOK {
+			msg.SRv6Locator = attrs.srv6Locator
 		}
-		msg.OpaquePrefixAttribute = lsprefix.GetOpaquePrefixAttribute()
+		msg.OpaquePrefixAttribute = attrs.opaque
 	}
 
 	return &msg, nil

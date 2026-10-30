@@ -278,6 +278,8 @@ func (p *producer) processNLRI71SubTypes(nlri bgp.MPNLRI, operation int, ph *bmp
 		glog.Errorf("failed to NLRI 71 with error: %+v", err)
 		return
 	}
+	// The Prefix NLRI of the UPDATE share its BGP-LS Attribute.
+	var prefixAttrs lsPrefixAttrs
 	for _, e := range ls.NLRI {
 		// ipv4Flag used to differentiate between IPv4 and IPv6 Prefix NLRI messages
 		ipv4Flag := false
@@ -321,7 +323,7 @@ func (p *producer) processNLRI71SubTypes(nlri bgp.MPNLRI, operation int, ph *bmp
 				glog.Errorf("NLRI 71 type %d: expected *base.PrefixNLRI, got %T", e.Type, e.LS)
 				continue
 			}
-			msg, err := p.lsPrefix(prfx, nlri.GetNextHop(), operation, ph, update, ipv4Flag)
+			msg, err := p.lsPrefixShared(prfx, nlri.GetNextHop(), operation, ph, update, ipv4Flag, &prefixAttrs)
 			if err != nil {
 				glog.Errorf("failed to produce ls_prefix message with error: %+v", err)
 				continue
@@ -396,6 +398,8 @@ func (p *producer) processNLRI72SubTypes(nlri bgp.MPNLRI, operation int, ph *bmp
 		glog.Errorf("failed to decode NLRI 72 with error: %+v", err)
 		return
 	}
+	// The Prefix NLRI of the UPDATE share its BGP-LS Attribute.
+	var prefixAttrs lsPrefixAttrs
 	for _, e := range ls.NLRI {
 		rd := ""
 		if e.RD != nil {
@@ -444,7 +448,7 @@ func (p *producer) processNLRI72SubTypes(nlri bgp.MPNLRI, operation int, ph *bmp
 				glog.Errorf("NLRI 72 type %d: expected *base.PrefixNLRI, got %T", e.Type, e.LS)
 				continue
 			}
-			msg, err := p.lsPrefix(prfx, nlri.GetNextHop(), operation, ph, update, ipv4Flag)
+			msg, err := p.lsPrefixShared(prfx, nlri.GetNextHop(), operation, ph, update, ipv4Flag, &prefixAttrs)
 			if err != nil {
 				glog.Errorf("failed to produce ls_prefix message with error: %+v", err)
 				continue
