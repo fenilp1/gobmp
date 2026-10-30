@@ -8,8 +8,10 @@ Message updates and major project changes should be documented here.
 
 #### Added
 
-- `l3vpn.UnmarshalL3VPNNLRIWithOptions` decodes VPN NLRI per `l3vpn.Options`; `UnmarshalL3VPNNLRI` now wraps it
-- `unicast.UnmarshalLUNLRIWithOptions` decodes labeled unicast NLRI per `unicast.Options`; `UnmarshalLUNLRI` now wraps it
+- `l3vpn.UnmarshalL3VPNNLRIWithOptions` decodes VPN NLRI per `l3vpn.Options`; `UnmarshalL3VPNNLRI` wraps it and, not
+  knowing the direction, still reads a 0x800000 or 0x000000 label field as the Compatibility field (no label)
+- `unicast.UnmarshalLUNLRIWithOptions` decodes labeled unicast NLRI per `unicast.Options`; `UnmarshalLUNLRI` wraps it and
+  still reads a 0x800000 label field as the Compatibility field (no label)
 
 #### Changed
 
