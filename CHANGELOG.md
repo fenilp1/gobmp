@@ -14,6 +14,7 @@ Message updates and major project changes should be documented here.
 
 - Extended communities of type 0x81 and 0x82 with sub-types other than 0x08 no longer borrow type 0x80 flowspec names (e.g. `81 06 ...` printed `flowspec-traffic-rate=[ ... ]`); per the IANA Generic Transitive Part 2/Part 3 registries they print `Subtype unknown=[ ... ]`
 - Flowspec traffic-rate-bytes (type 0x80, sub-type 0x06) with a negative rate is treated as zero (RFC 8955 §7.1): `80 06 00 00 c4 7a 00 00` (-1000) reads `flowspec-traffic-rate=AS: 0 Rate: 0 bps` instead of `Rate: 4294959296 bps`; non-negative rates print as before
+- Flowspec traffic-rate-bytes (type 0x80, sub-type 0x06) no longer wraps above 536,870,880 B/s (≈4.3 Gbit/s): the bps value is computed in 64 bits, so a 10G policer (1.25e9 B/s) reads `Rate: 10000000000 bps` instead of `Rate: 1410065408 bps`; rates of 2^61 B/s or more and +Inf read 18446744073709551615; lower rates print as before
 
 ### 2026-03-01
 

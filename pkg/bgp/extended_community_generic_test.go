@@ -1,6 +1,11 @@
 package bgp
 
-import "testing"
+import (
+	"encoding/binary"
+	"fmt"
+	"math"
+	"testing"
+)
 
 // TestGenericTransitiveSubTypes covers type 0x80 sub-types from the IANA
 // "Generic Transitive Extended Community Sub-Types" registry:
@@ -111,6 +116,15 @@ func TestFlowspecTrafficRateBytes(t *testing.T) {
 		{[]byte{0x80, 0x06, 0x00, 0x00, 0xc4, 0x7a, 0x00, 0x00}, "flowspec-traffic-rate=AS: 0 Rate: 0 bps"}, // -1000
 		{[]byte{0x80, 0x06, 0x00, 0x00, 0xbf, 0x80, 0x00, 0x00}, "flowspec-traffic-rate=AS: 0 Rate: 0 bps"}, // -1
 		{[]byte{0x80, 0x06, 0x00, 0x00, 0x7f, 0xc0, 0x00, 0x00}, "flowspec-traffic-rate=AS: 0 Rate: 0 bps"}, // NaN
+		// Computed in uint64: rates of 2^29 B/s and more no longer wrap.
+		// 536870911 is not a float32; 536870880 is the largest below 2^29.
+		{[]byte{0x80, 0x06, 0x00, 0x00, 0x4d, 0xff, 0xff, 0xff}, "flowspec-traffic-rate=AS: 0 Rate: 4294967040 bps"},           // 536870880 B/s
+		{[]byte{0x80, 0x06, 0x00, 0x00, 0x4e, 0x00, 0x00, 0x00}, "flowspec-traffic-rate=AS: 0 Rate: 4294967296 bps"},           // 2^29 = float32(536870911)
+		{[]byte{0x80, 0x06, 0x00, 0x00, 0x4e, 0x95, 0x02, 0xf9}, "flowspec-traffic-rate=AS: 0 Rate: 10000000000 bps"},          // 1.25e9 B/s (10G)
+		{[]byte{0x80, 0x06, 0x00, 0x00, 0x5d, 0xff, 0xff, 0xff}, "flowspec-traffic-rate=AS: 0 Rate: 18446742974197923840 bps"}, // largest float32 below 2^61
+		{[]byte{0x80, 0x06, 0x00, 0x00, 0x5e, 0x00, 0x00, 0x00}, "flowspec-traffic-rate=AS: 0 Rate: 18446744073709551615 bps"}, // 2^61 saturates
+		{[]byte{0x80, 0x06, 0x00, 0x00, 0x7f, 0x7f, 0xff, 0xff}, "flowspec-traffic-rate=AS: 0 Rate: 18446744073709551615 bps"}, // MaxFloat32
+		{[]byte{0x80, 0x06, 0x00, 0x00, 0x7f, 0x80, 0x00, 0x00}, "flowspec-traffic-rate=AS: 0 Rate: 18446744073709551615 bps"}, // +Inf
 	}
 	for _, tt := range tests {
 		ext, err := makeExtCommunity(tt.input)
@@ -119,6 +133,23 @@ func TestFlowspecTrafficRateBytes(t *testing.T) {
 		}
 		if got := ext.String(); got != tt.expect {
 			t.Errorf("% x: got %s, want %s", tt.input, got, tt.expect)
+		}
+	}
+}
+
+// TestFlowspecTrafficRateBytes_Unchanged checks that every rate that did not
+// overflow the previous uint32 computation renders exactly as before.
+func TestFlowspecTrafficRateBytes_Unchanged(t *testing.T) {
+	for _, r := range []float32{0, 0.5, 1, 1000, 125000, 1.25e6, 536870880, 1e8} {
+		v := []byte{0x80, 0x06, 0x00, 0x07, 0, 0, 0, 0}
+		binary.BigEndian.PutUint32(v[4:], math.Float32bits(r))
+		ext, err := makeExtCommunity(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "flowspec-traffic-rate=" + fmt.Sprintf("AS: %d Rate: %d bps", 7, uint32(r)*8)
+		if got := ext.String(); got != want {
+			t.Errorf("rate %v: got %s, want %s", r, got, want)
 		}
 	}
 }

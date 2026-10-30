@@ -531,13 +531,20 @@ func type80(subType uint8, value []byte) string {
 				" SI=" + strconv.Itoa(int(value[3])) +
 				" SFT=" + strconv.Itoa(int(binary.BigEndian.Uint16(value[4:6])))
 		case 0x06:
-			// traffic-rate-bytes (RFC 8955 Section 7.1): negative values MUST
-			// be treated as zero.
+			// traffic-rate-bytes (RFC 8955 Section 7.1): IEEE float bytes per
+			// second, printed as bits per second; negative values MUST be
+			// treated as zero. Rates of 2^61 B/s or more (and +Inf) saturate.
 			rate := math.Float32frombits(binary.BigEndian.Uint32(value[2:]))
-			if !(rate > 0) {
-				rate = 0
+			var bps uint64
+			switch {
+			case !(rate > 0):
+				bps = 0
+			case rate >= 1<<61:
+				bps = math.MaxUint64
+			default:
+				bps = uint64(rate) * 8
 			}
-			s = fmt.Sprintf("AS: %d Rate: %d bps", binary.BigEndian.Uint16(value[:2]), uint32(rate)*8)
+			s = fmt.Sprintf("AS: %d Rate: %d bps", binary.BigEndian.Uint16(value[:2]), bps)
 		case 0x08:
 			s = fmt.Sprintf("%d:%d", binary.BigEndian.Uint16(value[0:2]), binary.BigEndian.Uint32(value[2:]))
 		case 0x07:
