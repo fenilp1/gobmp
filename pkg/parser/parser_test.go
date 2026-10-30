@@ -162,6 +162,7 @@ func TestParsingWorkerShortMessageLength(t *testing.T) {
 		{"StatsReport too short", bmp.StatsReportMsg},
 		{"PeerDown too short", bmp.PeerDownMsg},
 		{"PeerUp too short", bmp.PeerUpMsg},
+		{"RouteMirror too short", bmp.RouteMirrorMsg},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -243,6 +244,74 @@ func TestParsingWorkerNonUpdateSkipped(t *testing.T) {
 	}
 	if _, ok := msgs[0].Payload.(*bmp.PeerDownMessage); !ok {
 		t.Fatalf("payload type = %T, want *bmp.PeerDownMessage", msgs[0].Payload)
+	}
+}
+
+// buildRouteMirrorMsg returns a BMP Route Mirroring message carrying body as its TLVs.
+func buildRouteMirrorMsg(perPeerHeader []byte, body []byte) []byte {
+	msgLen := bmp.CommonHeaderLength + bmp.PerPeerHeaderLength + len(body)
+	b := make([]byte, msgLen)
+	b[0] = 3
+	binary.BigEndian.PutUint32(b[1:5], uint32(msgLen))
+	b[5] = bmp.RouteMirrorMsg
+	copy(b[6:], perPeerHeader)
+	copy(b[6+bmp.PerPeerHeaderLength:], body)
+	return b
+}
+
+// TestParsingWorkerRouteMirror verifies that a Route Mirroring message reaches the
+// producer queue, and that a malformed one is skipped without dropping the next message.
+func TestParsingWorkerRouteMirror(t *testing.T) {
+	emptyPPH := make([]byte, bmp.PerPeerHeaderLength)
+	// Information TLV: Errored PDU, then BGP Message TLV: KEEPALIVE.
+	body := []byte{0x00, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x13}
+	for i := 0; i < 16; i++ {
+		body = append(body, 0xff)
+	}
+	body = append(body, 0x00, 0x13, 0x04)
+	truncated := []byte{0x00, 0x00, 0x00, 0x13, 0xff} // TLV claims 19 bytes, has 1
+
+	input := append(buildRouteMirrorMsg(emptyPPH, truncated), buildRouteMirrorMsg(emptyPPH, body)...)
+	producerQueue := make(chan bmp.Message, 10)
+	p := &parser{producerQueue: producerQueue, config: &Config{SpeakerIP: "192.0.2.1"}}
+	p.parsingWorker(input)
+	msgs := collectMessages(producerQueue)
+
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	rm, ok := msgs[0].Payload.(*bmp.RouteMirror)
+	if !ok {
+		t.Fatalf("payload type = %T, want *bmp.RouteMirror", msgs[0].Payload)
+	}
+	if msgs[0].PeerHeader == nil || msgs[0].SpeakerIP != "192.0.2.1" {
+		t.Errorf("message missing peer header or speaker IP: %+v", msgs[0])
+	}
+	if len(rm.TLVs) != 2 || rm.TLVs[0].InfoCode != bmp.RouteMirrorInfoErroredPDU || rm.TLVs[1].BGPType != 4 {
+		t.Errorf("unexpected TLVs: %+v", rm.TLVs)
+	}
+}
+
+// TestParsingWorkerRouteMirrorLocRIBIgnored verifies that a Route Mirroring message
+// for a Loc-RIB peer (peer type 3) is ignored per RFC 9069 §5.5, and that the next
+// message is still processed.
+func TestParsingWorkerRouteMirrorLocRIBIgnored(t *testing.T) {
+	messagesLost := []byte{0x00, 0x01, 0x00, 0x02, 0x00, 0x01}
+	locRIBPPH := make([]byte, bmp.PerPeerHeaderLength)
+	locRIBPPH[0] = byte(bmp.PeerType3)
+	input := append(buildRouteMirrorMsg(locRIBPPH, messagesLost),
+		buildRouteMirrorMsg(make([]byte, bmp.PerPeerHeaderLength), messagesLost)...)
+
+	producerQueue := make(chan bmp.Message, 10)
+	p := &parser{producerQueue: producerQueue, config: &Config{}}
+	p.parsingWorker(input)
+	msgs := collectMessages(producerQueue)
+
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message (Loc-RIB mirror ignored), got %d", len(msgs))
+	}
+	if _, ok := msgs[0].Payload.(*bmp.RouteMirror); !ok || msgs[0].PeerHeader.PeerType != bmp.PeerType0 {
+		t.Errorf("got payload %T from peer type %d, want *bmp.RouteMirror from peer type 0", msgs[0].Payload, msgs[0].PeerHeader.PeerType)
 	}
 }
 

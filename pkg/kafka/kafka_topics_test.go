@@ -48,6 +48,7 @@ func TestPublishMessageTopics(t *testing.T) {
 		{name: "IPv4", msgType: bmp.MUPV4Msg, topic: MUPMessageV4Topic},
 		{name: "IPv6", msgType: bmp.MUPV6Msg, topic: MUPMessageV6Topic},
 		{name: "statistics", msgType: bmp.StatsReportMsg, topic: StatsMessageTopic},
+		{name: "route mirroring", msgType: bmp.RouteMirroringMsg, topic: RouteMirrorTopic},
 		{name: "raw", msgType: bmp.BMPRawMsg, topic: RawMessageTopic},
 	}
 

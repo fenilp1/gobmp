@@ -14,11 +14,12 @@ It also does not change which UPDATEs are recognized as End-of-RIB.
 ## Traffic before Peer Up
 
 [RFC 7854 section 3.3](https://www.rfc-editor.org/rfc/rfc7854.html#section-3.3)
-places Peer Up before the initial Route Monitoring messages. Parsed Route
-Monitoring and Statistics received before the connection's first valid Peer Up
-are skipped with a diagnostic. They are not buffered or allowed to block a later
-Peer Up. Once that initial Peer Up has been processed, existing peer-identity and
-capability handling continues unchanged.
+places Peer Up before the initial Route Monitoring messages, and Route Mirroring
+may be sent only when Route Monitoring would be legal (section 4.7). Parsed Route
+Monitoring, Route Mirroring and Statistics received before the connection's first
+valid Peer Up are skipped with a diagnostic. They are not buffered or allowed to
+block a later Peer Up. Once that initial Peer Up has been processed, existing
+peer-identity and capability handling continues unchanged.
 
 RAW mode does not require Peer Up. Each received frame is encapsulated in the
 OpenBMP envelope and published in input order with its BMP bytes preserved.

@@ -4,6 +4,13 @@ Message updates and major project changes should be documented here.
 
 ## [Unreleased]
 
+### 2026-10-30
+
+#### Added
+
+- BMP Route Mirroring decoding per RFC 7854 Section 4.7, published verbatim with its TLVs to `gobmp.parsed.route_mirror`
+- Kafka topic `gobmp.parsed.route_mirror`; deployments that pre-create Kafka topics must add it
+
 ### 2026-03-01
 
 #### Added

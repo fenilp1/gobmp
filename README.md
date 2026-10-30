@@ -552,11 +552,57 @@ topics in this table are shown for `--split-af=true` (the default):
 | `gobmp.parsed.mup_v4` | MUP v4 routes |
 | `gobmp.parsed.mup_v6` | MUP v6 routes |
 | `gobmp.parsed.mup` | Combined MUP v4/v6 routes (when `--split-af=false`) |
+| `gobmp.parsed.route_mirror` | BMP Route Mirroring messages: mirrored BGP PDUs, errored PDUs and lost-message notices (RFC 7854 §4.7) |
 | `gobmp.raw` | RAW OpenBMP binary messages (when `--bmp-raw=true`) |
 
 When `--split-af=false`, MUP IPv4 and IPv6 messages are published to
 `gobmp.parsed.mup` instead of the split `gobmp.parsed.mup_v4` and
 `gobmp.parsed.mup_v6` topics.
+
+### Route Mirroring messages
+
+Each BMP Route Mirroring message (RFC 7854 §4.7) is published as one JSON
+message on `gobmp.parsed.route_mirror` (topic prefix applies). The mirrored BGP
+PDU is not decoded beyond its header, because it may be the PDU the router
+could not process; it is published verbatim as hex, including the 16-byte marker.
+TLVs are listed in wire order, and TLV types gobmp does not decode are kept as
+hex in `value`. `is_errored` is true when the message carries an Information
+TLV with code 0 (Errored PDU). A BGP Message or Information TLV too short to
+decode is kept as hex in `value` with `"malformed": true`, and the rest of the
+message is still published. Messages are published in the order the router sent
+them. The L flag has no significance for Route Mirroring, so no post-policy
+flags are published, and messages for Loc-RIB peers (peer type 3) are ignored
+(RFC 9069 §5.5).
+
+```json
+{
+  "router_hash": "fb5d34c594dff80c59019b6d132185f7",
+  "router_ip": "10.1.34.1",
+  "peer_hash": "d67b274c33ea1ff0ffe9dd781938b0de",
+  "remote_bgp_id": "10.0.0.7",
+  "peer_ip": "10.0.0.7",
+  "peer_type": 0,
+  "peer_asn": 65000,
+  "peer_rd": "0:0",
+  "timestamp": "2026-10-29T12:00:00.123456Z",
+  "is_adj_rib_out": false,
+  "tlvs": [
+    { "type": 1, "information": { "code": 0, "name": "errored_pdu" } },
+    {
+      "type": 0,
+      "bgp_message": {
+        "type": 2,
+        "length": 23,
+        "pdu": "ffffffffffffffffffffffffffffffff0017020000ffff",
+        "is_errored": true
+      }
+    }
+  ]
+}
+```
+
+Information codes: `0` = `errored_pdu`, `1` = `messages_lost`. A Messages Lost
+notice usually arrives without a `bgp_message` TLV.
 
 ---
 

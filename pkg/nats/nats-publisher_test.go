@@ -59,6 +59,7 @@ func TestTopicForMessage(t *testing.T) {
 		{bmp.MUPV4Msg, mupMessageV4Topic, true},
 		{bmp.MUPV6Msg, mupMessageV6Topic, true},
 		{bmp.StatsReportMsg, statsMessageTopic, true},
+		{bmp.RouteMirroringMsg, routeMirrorTopic, true},
 		{bmp.BMPRawMsg, rawMessageTopic, true},
 		{9999, "", false},
 	}

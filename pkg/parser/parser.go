@@ -224,10 +224,31 @@ func (p *parser) parsingWorker(b []byte) {
 				}
 			}
 		case bmp.RouteMirrorMsg:
-			glog.V(5).Infof("Route Mirroring message")
-			if glog.V(6) {
-				glog.Infof("Content:%s", tools.MessageHex(b))
+			if ch.MessageLength < uint32(bmp.CommonHeaderLength+bmp.PerPeerHeaderLength) {
+				glog.Errorf("BMP RouteMirror message too short for Per-Peer Header: length=%d, need at least %d",
+					ch.MessageLength, bmp.CommonHeaderLength+bmp.PerPeerHeaderLength)
+				return
 			}
+			if bmpMsg.PeerHeader, err = bmp.UnmarshalPerPeerHeader(b[pos : pos+bmp.PerPeerHeaderLength]); err != nil {
+				if errors.Is(err, bmp.ErrUnknownPeerType) {
+					break // skip message, continue processing stream
+				}
+				glog.Errorf("fail to recover BMP Per Peer Header with error: %+v", err)
+				return
+			}
+			if bmpMsg.PeerHeader.PeerType == bmp.PeerType3 {
+				// RFC 9069 §5.5: Route Mirroring messages for a Loc-RIB peer SHOULD be ignored.
+				glog.V(5).Infof("ignoring BMP Route Mirroring message for Loc-RIB peer (RFC 9069 §5.5)")
+				break
+			}
+			perPerHeaderLen = bmp.PerPeerHeaderLength
+			rm, err := bmp.UnmarshalRouteMirrorMessage(b[pos+perPerHeaderLen : pos+msgLen-bmp.CommonHeaderLength])
+			if err != nil {
+				// BMP framing is intact, so skip only this message.
+				glog.Errorf("fail to recover BMP Route Mirroring message with error: %+v", err)
+				break
+			}
+			bmpMsg.Payload = rm
 		}
 		pos += msgLen - bmp.CommonHeaderLength
 		if p.producerQueue != nil && bmpMsg.Payload != nil {

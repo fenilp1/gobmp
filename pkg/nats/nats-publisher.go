@@ -37,6 +37,7 @@ const (
 	mupMessageV4Topic      = "gobmp.parsed.mup_v4"
 	mupMessageV6Topic      = "gobmp.parsed.mup_v6"
 	statsMessageTopic      = "gobmp.parsed.statistics"
+	routeMirrorTopic       = "gobmp.parsed.route_mirror"
 	rawMessageTopic        = "gobmp.raw"
 	parsedWildcardSubject  = "gobmp.parsed.*"
 )
@@ -113,6 +114,8 @@ func topicForMessage(t int) (string, bool) {
 		return mupMessageV6Topic, true
 	case bmp.StatsReportMsg:
 		return statsMessageTopic, true
+	case bmp.RouteMirroringMsg:
+		return routeMirrorTopic, true
 	case bmp.BMPRawMsg:
 		return rawMessageTopic, true
 	}

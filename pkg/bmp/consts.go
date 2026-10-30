@@ -18,7 +18,8 @@ const (
 	InitiationMsg = 4
 	// TerminationMsg defines BMP Termination message
 	TerminationMsg = 5
-	// RouteMirrorMsg defines BMP Route Mirror message type
+	// RouteMirrorMsg defines BMP Route Mirroring message type (RFC 7854 §4.7), the code
+	// carried in the BMP Common Header. See RouteMirroringMsg for the published topic.
 	RouteMirrorMsg = 6
 	// UnicastPrefixMsg defines a subtype of BMP Route Monitoring message
 	UnicastPrefixMsg = 7
@@ -83,6 +84,9 @@ const (
 	// LSOpaqueMsg defines BMP Route Monitoring message carrying a BGP-LS NLRI
 	// of a type gobmp does not decode, published raw per RFC 9552 §5.2
 	LSOpaqueMsg = 23
+	// RouteMirroringMsg identifies the topic for parsed BMP Route Mirroring messages
+	// (BMP message type RouteMirrorMsg). It is a publisher topic id, not a BMP message type code.
+	RouteMirroringMsg = 25
 	// BMPRawMsg defines BMP RAW message type for unprocessed BMP messages
 	BMPRawMsg = 255
 )

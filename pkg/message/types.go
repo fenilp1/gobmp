@@ -903,3 +903,53 @@ type Stats struct {
 	// Type 17: Per-AFI/SAFI Post-policy Adj-RIB-Out (RFC 8671)
 	PerAFIPostPolicyAdjRIBOut []AFISAFIStat `json:"per_afi_post_policy_adj_rib_out,omitempty"`
 }
+
+// RouteMirror defines the message published for a BMP Route Mirroring message (RFC 7854 §4.7).
+// TLVs are listed in wire order.
+type RouteMirror struct {
+	RouterHash  string `json:"router_hash,omitempty"`
+	RouterIP    string `json:"router_ip,omitempty"`
+	PeerHash    string `json:"peer_hash,omitempty"`
+	RemoteBGPID string `json:"remote_bgp_id,omitempty"`
+	PeerIP      string `json:"peer_ip,omitempty"`
+	PeerType    uint8  `json:"peer_type"`
+	PeerASN     uint32 `json:"peer_asn,omitempty"`
+	PeerRD      string `json:"peer_rd,omitempty"`
+	Timestamp   string `json:"timestamp,omitempty"`
+	// IsAdjRIBOut is assigned from the PerPeerHeader O flag. The L flag has no
+	// significance for Route Mirroring (RFC 7854 §4.2), so no post-policy flags are set,
+	// and Loc-RIB peers are never published (RFC 9069 §5.5).
+	IsAdjRIBOut bool             `json:"is_adj_rib_out"`
+	TLVs        []RouteMirrorTLV `json:"tlvs"`
+}
+
+// RouteMirrorTLV defines one Route Mirroring TLV. Exactly one of BGPMessage,
+// Information or Value is set, depending on Type.
+type RouteMirrorTLV struct {
+	Type        uint16                  `json:"type"`
+	BGPMessage  *RouteMirrorBGPMessage  `json:"bgp_message,omitempty"`
+	Information *RouteMirrorInformation `json:"information,omitempty"`
+	// Value is the hex-encoded value of a TLV type gobmp does not decode, or of a
+	// malformed BGP Message or Information TLV.
+	Value string `json:"value,omitempty"`
+	// Malformed is true when a BGP Message or Information TLV was too short to decode.
+	Malformed bool `json:"malformed,omitempty"`
+}
+
+// RouteMirrorBGPMessage describes a mirrored BGP PDU (TLV type 0).
+type RouteMirrorBGPMessage struct {
+	// Type and Length are the BGP header's type and length fields, as found on the wire.
+	Type   uint8  `json:"type"`
+	Length uint16 `json:"length"`
+	// PDU is the hex-encoded BGP PDU, including the 16-byte marker.
+	PDU string `json:"pdu"`
+	// IsErrored is true when the message carries an Errored PDU Information TLV.
+	IsErrored bool `json:"is_errored"`
+}
+
+// RouteMirrorInformation describes an Information TLV (TLV type 1).
+type RouteMirrorInformation struct {
+	Code uint16 `json:"code"`
+	// Name is "errored_pdu" or "messages_lost"; omitted for unknown codes.
+	Name string `json:"name,omitempty"`
+}

@@ -205,6 +205,15 @@ func (p *producer) producingWorker(msg bmp.Message) {
 		}
 		p.attachIdentitySnapshot(&msg)
 		p.produceStatsMessage(msg)
+	case *bmp.RouteMirror:
+		select {
+		case <-p.speakerReady:
+		default:
+			glog.Warningf("received Route Mirroring before Peer Up, ignoring it")
+			return
+		}
+		p.attachIdentitySnapshot(&msg)
+		p.produceRouteMirrorMessage(msg)
 	case *bmp.RawMessage:
 		p.produceRawMessage(msg)
 	default:

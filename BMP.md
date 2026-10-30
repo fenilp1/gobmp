@@ -22,6 +22,7 @@ ls_srv6_sid
 ls_opaque
 l3vpn
 evpn
+route_mirror
 ```
 With much gratitude we are using OpenBMP's message parsing as a template:
 
