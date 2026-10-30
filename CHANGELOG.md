@@ -8,7 +8,7 @@ Message updates and major project changes should be documented here.
 
 #### Changed
 
-- NATS publisher publishes to JetStream asynchronously in call order instead of waiting for each message's acknowledgement, with at most `nats_max_pending_acks` (`--nats-max-pending-acks`, default 4096) messages awaiting one and `nats_ack_timeout_ms` (`--nats-ack-timeout-ms`, default 30000) to wait for each. Acknowledgement failures and timeouts no longer reach the caller: they are logged, at most once a second, and the message is lost. During a JetStream outage publishing blocks once the limit is reached, stalling BMP reads (backpressure), and messages whose acknowledgement times out are lost. Stop waits up to 10 s for outstanding acknowledgements, and a publish after Stop returns an error
+- NATS publisher publishes to JetStream asynchronously in call order instead of waiting for each message's acknowledgement, with at most `nats_max_pending_acks` (`--nats-max-pending-acks`, default 4096) messages awaiting one and `nats_ack_timeout_ms` (`--nats-ack-timeout-ms`, default 30000, at most 24 h) to wait for each. Acknowledgement failures and timeouts no longer reach the caller: they are logged, at most once a second, and the message may be lost (one buffered during a reconnect can still be stored). During a JetStream outage publishing blocks once the limit is reached, stalling BMP reads (backpressure), and messages whose acknowledgement times out may be lost. Stop waits up to 10 s for outstanding acknowledgements, and a publish after Stop returns an error
 
 #### Fixed
 

@@ -57,6 +57,7 @@ const (
 	// NATS JetStream acknowledgement defaults, those of the nats package.
 	defaultNATSMaxPendingAcks = nats.DefaultMaxPendingAcks
 	defaultNATSAckTimeoutMs   = int(nats.DefaultAckTimeout / time.Millisecond)
+	maxNATSAckTimeoutMs       = 24 * 60 * 60 * 1000 // 24 h; larger values overflow or make no sense
 )
 
 func init() {
@@ -137,6 +138,9 @@ func main() {
 		}
 	case config.PublisherTypeNATS:
 		if cfg.NATSConfig != nil && cfg.NATSConfig.NatsSrv != "" {
+			if cfg.NATSConfig.NatsAckTimeoutMs > maxNATSAckTimeoutMs {
+				fatal("invalid nats_ack_timeout_ms %d: must be <= %d", cfg.NATSConfig.NatsAckTimeoutMs, maxNATSAckTimeoutMs)
+			}
 			cfg.Publisher, err = nats.NewPublisherWithConfig(&nats.Config{
 				ServerAddress:  cfg.NATSConfig.NatsSrv,
 				MaxPendingAcks: cfg.NATSConfig.NatsMaxPendingAcks,
@@ -327,8 +331,8 @@ func applyConfigOverrides(cfg *config.Config, fs *flag.FlagSet) error {
 			cfg.NATSConfig.NatsMaxPendingAcks = natsMaxPendingAcks
 			natsAckSet = true
 		case "nats-ack-timeout-ms":
-			if natsAckTimeoutMs <= 0 {
-				visitErr = fmt.Errorf("invalid value for --nats-ack-timeout-ms: %d: must be > 0", natsAckTimeoutMs)
+			if natsAckTimeoutMs <= 0 || natsAckTimeoutMs > maxNATSAckTimeoutMs {
+				visitErr = fmt.Errorf("invalid value for --nats-ack-timeout-ms: %d: must be > 0 and <= %d", natsAckTimeoutMs, maxNATSAckTimeoutMs)
 				return
 			}
 			if cfg.NATSConfig == nil {
