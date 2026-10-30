@@ -9,9 +9,9 @@ import (
 )
 
 // UnmarshalMulticastNLRI builds MP NLRI object for multicast routes (AFI 1/2
-// SAFI 2) from the slice of bytes, with the ADD-PATH state s (see
-// base.UnmarshalRoutes).
-func UnmarshalMulticastNLRI(b []byte, s base.PathIDState) (*base.MPNLRI, error) {
+// SAFI 2) from the slice of bytes, with the ADD-PATH state s, ipv6 for AFI 2
+// (see base.UnmarshalRoutes).
+func UnmarshalMulticastNLRI(b []byte, s base.PathIDState, ipv6 bool) (*base.MPNLRI, error) {
 	if glog.V(6) {
 		glog.Infof("MP Multicast NLRI Raw: %s", tools.MessageHex(b))
 	}
@@ -19,7 +19,7 @@ func UnmarshalMulticastNLRI(b []byte, s base.PathIDState) (*base.MPNLRI, error) 
 		return nil, fmt.Errorf("NLRI length is 0")
 	}
 	mpnlri := base.MPNLRI{}
-	r, err := base.UnmarshalRoutes(b, s)
+	r, err := base.UnmarshalRoutes(b, s, ipv6)
 	if err != nil {
 		return nil, err
 	}

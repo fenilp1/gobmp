@@ -14,6 +14,7 @@ func TestUnmarshalMulticastNLRI(t *testing.T) {
 		input  []byte
 		expect *base.MPNLRI
 		pathID bool
+		ipv6   bool
 	}{
 		{
 			name:  "mp multicast nlri 1",
@@ -136,6 +137,7 @@ func TestUnmarshalMulticastNLRI(t *testing.T) {
 		},
 		{
 			name:  "IPv6 multicast prefix ff00::/8",
+			ipv6:  true,
 			input: []byte{0x08, 0xff},
 			expect: &base.MPNLRI{
 				NLRI: []base.Route{
@@ -149,6 +151,7 @@ func TestUnmarshalMulticastNLRI(t *testing.T) {
 		},
 		{
 			name:  "IPv6 multicast prefix ff02::1/128",
+			ipv6:  true,
 			input: []byte{0x80, 0xff, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01},
 			expect: &base.MPNLRI{
 				NLRI: []base.Route{
@@ -201,6 +204,7 @@ func TestUnmarshalMulticastNLRI(t *testing.T) {
 		},
 		{
 			name:  "IPv6 multicast ff02::2/128 with PathID",
+			ipv6:  true,
 			input: []byte{0x00, 0x00, 0x00, 0x05, 0x80, 0xff, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02},
 			expect: &base.MPNLRI{
 				NLRI: []base.Route{
@@ -239,6 +243,7 @@ func TestUnmarshalMulticastNLRI(t *testing.T) {
 		},
 		{
 			name:  "IPv6 multicast /64 prefix",
+			ipv6:  true,
 			input: []byte{0x40, 0xff, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
 			expect: &base.MPNLRI{
 				NLRI: []base.Route{
@@ -279,7 +284,7 @@ func TestUnmarshalMulticastNLRI(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalMulticastNLRI(tt.input, knownPathIDs(tt.pathID))
+			got, err := UnmarshalMulticastNLRI(tt.input, knownPathIDs(tt.pathID), tt.ipv6)
 			if err != nil {
 				t.Fatalf("test failed with error: %+v", err)
 			}
@@ -304,10 +309,16 @@ func TestUnmarshalMulticastNLRIErrors(t *testing.T) {
 			pathID:  false,
 			wantErr: true,
 		},
+		{
+			// RFC 4271 §4.3, RFC 7606 §5.3: over 32 bits is malformed.
+			name:    "IPv4 /33",
+			input:   []byte{0x21, 0xe0, 0, 0, 1, 0},
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalMulticastNLRI(tt.input, knownPathIDs(tt.pathID))
+			got, err := UnmarshalMulticastNLRI(tt.input, knownPathIDs(tt.pathID), false)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("UnmarshalMulticastNLRI() error = %v, wantErr %v", err, tt.wantErr)
 				return

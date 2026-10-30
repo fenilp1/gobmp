@@ -11,8 +11,8 @@ import (
 
 // UnmarshalUnicastNLRI builds MP NLRI object from the slice of bytes of an
 // MP_REACH_NLRI or MP_UNREACH_NLRI attribute of AFI 1/2 SAFI 1, with the
-// ADD-PATH state s (see base.UnmarshalRoutes).
-func UnmarshalUnicastNLRI(b []byte, s base.PathIDState) (*base.MPNLRI, error) {
+// ADD-PATH state s, ipv6 for AFI 2 (see base.UnmarshalRoutes).
+func UnmarshalUnicastNLRI(b []byte, s base.PathIDState, ipv6 bool) (*base.MPNLRI, error) {
 	if glog.V(6) {
 		glog.Infof("MP Unicast NLRI Raw: %s", tools.MessageHex(b))
 	}
@@ -20,7 +20,7 @@ func UnmarshalUnicastNLRI(b []byte, s base.PathIDState) (*base.MPNLRI, error) {
 		return &base.MPNLRI{NLRI: make([]base.Route, 0)}, nil
 	}
 	mpnlri := base.MPNLRI{}
-	r, err := base.UnmarshalRoutes(b, s)
+	r, err := base.UnmarshalRoutes(b, s, ipv6)
 	if err != nil {
 		return nil, err
 	}

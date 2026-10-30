@@ -28,10 +28,16 @@ type Route struct {
 // NLRI and Withdrawn Routes fields or SAFI 1 and 2 MP_REACH_NLRI and
 // MP_UNREACH_NLRI, each preceded by a 4-octet ADD-PATH Path Identifier when
 // s says so (RFC 7911 §3). Only when s is unknown is a failed parse retried
-// with Path IDs (see DecodeWithPathID).
-func UnmarshalRoutes(b []byte, s PathIDState) ([]Route, error) {
+// with Path IDs (see DecodeWithPathID). A prefix longer than 32 bits, or 128
+// for ipv6, makes the field malformed (RFC 4271 §4.3, RFC 4760 §5, RFC 7606
+// §5.3).
+func UnmarshalRoutes(b []byte, s PathIDState, ipv6 bool) ([]Route, error) {
+	maxBits := 32
+	if ipv6 {
+		maxBits = 128
+	}
 	mp, err := DecodeWithPathID(s, false, func(pathID bool) (*MPNLRI, error) {
-		r, err := unmarshalRoutes(b, pathID)
+		r, err := unmarshalRoutes(b, pathID, maxBits)
 		if err != nil {
 			return nil, err
 		}
@@ -44,7 +50,7 @@ func UnmarshalRoutes(b []byte, s PathIDState) ([]Route, error) {
 	return mp.NLRI, nil
 }
 
-func unmarshalRoutes(b []byte, pathID bool) ([]Route, error) {
+func unmarshalRoutes(b []byte, pathID bool, maxBits int) ([]Route, error) {
 	if glog.V(6) {
 		glog.Infof("Routes Raw: %s Path ID flag: %t", tools.MessageHex(b), pathID)
 	}
@@ -65,6 +71,9 @@ func unmarshalRoutes(b []byte, pathID bool) ([]Route, error) {
 		}
 		// Updating length
 		route.Length = b[p]
+		if int(route.Length) > maxBits {
+			return nil, fmt.Errorf("malformed NLRI: prefix length %d bits over %d", route.Length, maxBits)
+		}
 		l := route.Length / 8
 		if route.Length%8 != 0 {
 			l++

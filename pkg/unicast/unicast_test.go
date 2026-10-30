@@ -15,6 +15,7 @@ func TestUnmarshalUnicastNLRI(t *testing.T) {
 		input  []byte
 		expect *base.MPNLRI
 		pathID bool
+		ipv6   bool
 	}{
 		{
 			name:  "empty input returns empty NLRI",
@@ -148,6 +149,7 @@ func TestUnmarshalUnicastNLRI(t *testing.T) {
 		},
 		{
 			name:  "Panic case #3",
+			ipv6:  true,
 			input: []byte{0x00, 0x00, 0x00, 0x01, 0x80, 0x01, 0x92, 0x01, 0x68, 0x00, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x93},
 			expect: &base.MPNLRI{
 				NLRI: []base.Route{
@@ -162,6 +164,7 @@ func TestUnmarshalUnicastNLRI(t *testing.T) {
 		},
 		{
 			name:  "issue_173",
+			ipv6:  true,
 			input: []byte{0x10, 0x20, 0x01},
 			expect: &base.MPNLRI{
 				NLRI: []base.Route{
@@ -176,7 +179,7 @@ func TestUnmarshalUnicastNLRI(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalUnicastNLRI(tt.input, knownPathIDs(tt.pathID))
+			got, err := UnmarshalUnicastNLRI(tt.input, knownPathIDs(tt.pathID), tt.ipv6)
 			if err != nil {
 				t.Fatalf("test failed with error: %+v", err)
 			}
@@ -391,6 +394,38 @@ func TestUnmarshalLUNLRI_PrefixLengthExceeds128(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "outside 0-128") {
 		t.Errorf("expected error about exceeding 128 bits, got: %v", err)
+	}
+}
+
+// TestUnmarshalUnicastNLRIPrefixLength checks that a prefix longer than the
+// address family allows makes the NLRI malformed (RFC 4271 §4.3, RFC 4760
+// §5, RFC 7606 §5.3).
+func TestUnmarshalUnicastNLRIPrefixLength(t *testing.T) {
+	v6Host := []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01}
+	tests := []struct {
+		name    string
+		input   []byte
+		ipv6    bool
+		wantErr bool
+	}{
+		{name: "IPv4 /32", input: []byte{0x20, 10, 0, 0, 1}},
+		{name: "IPv4 /33", input: []byte{0x21, 10, 0, 0, 1, 0}, wantErr: true},
+		{name: "IPv6 /128", input: append([]byte{0x80}, v6Host...), ipv6: true},
+		{name: "IPv6 /129", input: append([]byte{0x81}, append(v6Host, 0)...), ipv6: true, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := UnmarshalUnicastNLRI(tt.input, base.PathIDAbsent, tt.ipv6)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("UnmarshalUnicastNLRI() = %+v, want error", got)
+				}
+				return
+			}
+			if err != nil || len(got.NLRI) != 1 || int(got.NLRI[0].Length) != int(tt.input[0]) {
+				t.Fatalf("UnmarshalUnicastNLRI() = %+v, %v, want one /%d route", got, err, tt.input[0])
+			}
+		})
 	}
 }
 

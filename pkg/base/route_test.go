@@ -145,7 +145,7 @@ func TestUnmarshalBaseNLRI(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalRoutes(tt.input, tt.pathIDs)
+			got, err := UnmarshalRoutes(tt.input, tt.pathIDs, false)
 			if err != nil && !tt.wantErr {
 				t.Fatalf("test failed with error: %+v", err)
 			}
@@ -169,7 +169,7 @@ func TestUnmarshalRoutes_RetryLimit(t *testing.T) {
 	// With pathID=true: not enough bytes for PathID (need 4).
 	// With pathID=false: prefix length 255, need 32 bytes but only 0 remain.
 	// Both fail → should return error, not hang.
-	_, err := UnmarshalRoutes([]byte{0xFF}, PathIDUnknown)
+	_, err := UnmarshalRoutes([]byte{0xFF}, PathIDUnknown, false)
 	if err == nil {
 		t.Fatal("expected error for malformed input, got nil")
 	}
@@ -195,12 +195,14 @@ func TestUnmarshalRoutes_PathIDState(t *testing.T) {
 		{name: "present, Path ID", input: withID, state: PathIDPresent, pathID: 1},
 		{name: "present, no Path ID", input: plain, state: PathIDPresent, wantErr: true},
 		// A malformed field that reads as a /48 IPv4 route with Path ID
-		// 0x20003e81 if Path IDs are assumed.
+		// 0x20003e81 if Path IDs are assumed: rejected either way, as a
+		// prefix over 32 bits is malformed (RFC 7606 §5.3).
 		{name: "absent, malformed", input: []byte{0x20, 0x00, 0x3e, 0x81, 0x30, 0x00, 0x3e, 0x81, 0x0a, 0x00, 0x00}, state: PathIDAbsent, wantErr: true},
+		{name: "unknown, malformed", input: []byte{0x20, 0x00, 0x3e, 0x81, 0x30, 0x00, 0x3e, 0x81, 0x0a, 0x00, 0x00}, state: PathIDUnknown, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			routes, err := UnmarshalRoutes(tt.input, tt.state)
+			routes, err := UnmarshalRoutes(tt.input, tt.state, false)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("UnmarshalRoutes() = %+v, want error", routes)
@@ -212,6 +214,44 @@ func TestUnmarshalRoutes_PathIDState(t *testing.T) {
 			}
 			if len(routes) != 1 || routes[0].Length != 8 || routes[0].PathID != tt.pathID || !reflect.DeepEqual(routes[0].Prefix, []byte{0x0a}) {
 				t.Errorf("UnmarshalRoutes() = %+v, want one route 10.0.0.0/8 with Path ID %d", routes, tt.pathID)
+			}
+		})
+	}
+}
+
+// TestUnmarshalRoutes_PrefixLength checks that a prefix over 32 bits for
+// IPv4, or 128 for IPv6, makes the field malformed (RFC 4271 §4.3, RFC 4760
+// §5, RFC 7606 §5.3), with or without Path IDs.
+func TestUnmarshalRoutes_PrefixLength(t *testing.T) {
+	v6Host := []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01}
+	tests := []struct {
+		name    string
+		input   []byte
+		state   PathIDState
+		ipv6    bool
+		wantErr bool
+	}{
+		{name: "IPv4 /32", input: []byte{0x20, 10, 0, 0, 1}, state: PathIDAbsent},
+		{name: "IPv4 /33", input: []byte{0x21, 10, 0, 0, 1, 0}, state: PathIDAbsent, wantErr: true},
+		{name: "IPv4 /33 with Path ID", input: []byte{0, 0, 0, 1, 0x21, 10, 0, 0, 1, 0}, state: PathIDPresent, wantErr: true},
+		{name: "IPv4 /128", input: append([]byte{0x80}, v6Host...), state: PathIDAbsent, wantErr: true},
+		{name: "IPv6 /128", input: append([]byte{0x80}, v6Host...), state: PathIDAbsent, ipv6: true},
+		{name: "IPv6 /129", input: append([]byte{0x81}, append(v6Host, 0)...), state: PathIDAbsent, ipv6: true, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			routes, err := UnmarshalRoutes(tt.input, tt.state, tt.ipv6)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("UnmarshalRoutes() = %+v, want error", routes)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("UnmarshalRoutes() error: %v", err)
+			}
+			if len(routes) != 1 || int(routes[0].Length) != int(tt.input[0]) {
+				t.Errorf("UnmarshalRoutes() = %+v, want one /%d route", routes, tt.input[0])
 			}
 		})
 	}
