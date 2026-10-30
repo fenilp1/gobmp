@@ -4,6 +4,12 @@ Message updates and major project changes should be documented here.
 
 ## [Unreleased]
 
+### 2026-10-30
+
+#### Fixed
+
+- SIGTERM (docker stop, Kubernetes pod termination) killing gobmp without publishing what it had read: it now shuts down as on SIGINT, bounded at 25 s (exit status 1 on overrun), and a second signal exits at once; Docker's default 10 s stop timeout must be raised to at least 30 s (`docker stop -t`, `stop_grace_period`) for the 25 s to apply
+
 ### 2026-03-01
 
 #### Added

@@ -45,8 +45,13 @@ retain the skip rules above. Incomplete trailing frames are never published.
 The standalone parser/producer APIs still support an explicit stop signal. The
 server uses input closure instead, so shutdown does not abort an accepted frame.
 `PublishMessage` has no cancellation parameter: a blocked call must return before
-that connection worker and server Stop can finish. No hard shutdown deadline or
-broker-delivery/flush guarantee is added.
+that connection worker and server Stop can finish. After SIGINT or SIGTERM,
+gobmp bounds shutdown at 25 s: if server Stop has not returned by then, it exits
+with status 1 and messages not yet published are lost. The 25 s fit within the
+default 30 s Kubernetes grace period; Docker's default stop timeout is 10 s, so
+raise it to at least 30 s (`docker stop -t 30`, Compose `stop_grace_period`) or
+the container is killed before the deadline. No broker-delivery/flush guarantee
+is added.
 
 Regression tests exercise actual BMP wire frames through the parser/producer
 pipeline, including announcement, withdrawal, explicit End-of-RIB and Peer Down,

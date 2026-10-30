@@ -518,12 +518,17 @@ services:
   gobmp:
     image: sbezverk/gobmp
     network_mode: host
+    stop_grace_period: 30s
     command:
       - "--source-port=5000"
       - "--kafka-server=kafka:9092"
       - "--split-af=true"
       - "--v=3"
 ```
+
+On SIGTERM or SIGINT goBMP publishes what it has read and exits, within 25 s.
+Docker's default stop timeout is 10 s, so set `stop_grace_period: 30s` as above,
+or use `docker stop -t 30`; Kubernetes' default 30 s grace period is enough.
 
 ---
 

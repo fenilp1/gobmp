@@ -1,12 +1,16 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"net/http"
 	_ "net/http/pprof"
@@ -18,7 +22,6 @@ import (
 	"github.com/sbezverk/gobmp/pkg/gobmpsrv"
 	"github.com/sbezverk/gobmp/pkg/kafka"
 	"github.com/sbezverk/gobmp/pkg/nats"
-	"github.com/sbezverk/tools"
 )
 
 var (
@@ -44,6 +47,11 @@ const (
 	defaultKafkaTpRetnTimeMs = "900000" // 15 minutes in ms
 	defaultSplitAF           = true
 	defaultMsgFile           = ""
+	// shutdownTimeout bounds how long gobmp takes to publish what it has
+	// read and stop after a signal, within the 30 s Kubernetes gives a pod
+	// between SIGTERM and SIGKILL by default. Docker waits only 10 s by
+	// default, so containers need a longer stop timeout for it to apply.
+	shutdownTimeout = 25 * time.Second
 )
 
 func init() {
@@ -158,10 +166,33 @@ func main() {
 	}
 	bmpSrv.Start()
 
-	stopCh := tools.SetupSignalHandler()
-	<-stopCh
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	<-ctx.Done()
+	// Restore the default handling, so a second signal kills the process.
+	stop()
+	glog.Infof("received a shutdown signal, stopping within %s", shutdownTimeout)
+	if err := stopWithin(bmpSrv.Stop, shutdownTimeout); err != nil {
+		fatal("%v", err)
+	}
+	glog.Infof("gobmp stopped")
+	glog.Flush()
+}
 
-	bmpSrv.Stop()
+// stopWithin calls stop and waits up to timeout for it to return.
+func stopWithin(stop func(), timeout time.Duration) error {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		stop()
+	}()
+	t := time.NewTimer(timeout)
+	defer t.Stop()
+	select {
+	case <-done:
+		return nil
+	case <-t.C:
+		return fmt.Errorf("shutdown did not complete within %s, messages not yet published are lost", timeout)
+	}
 }
 
 // defaultKafkaConfig returns a KafkaConfig pre-populated with the retention-
