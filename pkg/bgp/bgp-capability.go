@@ -151,7 +151,7 @@ func UnmarshalBGPCapability(b []byte) (Capability, error) {
 		// the OPEN would drop the PeerUp and the per-peer state built from it.
 		// Anything that decodes these values must check the length first.
 		if want, ok := fixedCapabilityLength[code]; ok && int(length) != want {
-			glog.Warningf("capability code %d has invalid length %d at offset %d, expected %d; kept raw", code, length, capStart)
+			glog.Warningf("capability code %d has invalid length %d at offset %d, expected %d; kept raw", code, length, capStart, want)
 		} else {
 			switch code {
 			case 1:
