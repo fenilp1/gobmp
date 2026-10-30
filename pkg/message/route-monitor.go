@@ -56,28 +56,27 @@ func (p *producer) produceRouteMonitorMessage(msg bmp.Message) {
 }
 
 func (p *producer) processMPReach(attribute []byte, ph *bmp.PerPeerHeader, update *bgp.Update) {
-	nlri, err := bgp.UnmarshalMPReachNLRI(attribute, update.HasSRv6Transposition(), p.GetAddPathCapability(ph.GetTableKey()))
+	nlri, err := bgp.UnmarshalMPReachNLRI(attribute, update.HasSRv6Transposition())
 	if err != nil {
 		glog.Errorf("failed to process MP_REACH_NLRI with error: %+v", err)
 		return
 	}
 	reachableUpdate := copyUpdate(update)
 	if reach, ok := nlri.(*bgp.MPReachNLRI); ok {
-		reach.MultiLabel = p.multiLabelState(ph.GetTableKey(), reach.GetAFISAFIType())
-		reach.PathIDs = p.pathIDState(ph.GetTableKey(), reach.GetAFISAFIType())
+		reach.PathIDs, reach.MultiLabel = p.nlriState(ph, reach.GetAFISAFIType())
 		validateNHC(reachableUpdate, reach.AddressFamilyID, reach.SubAddressFamilyID, reach.NextHopAddress, ph)
 	}
 	p.processMPUpdate(nlri, AddPrefix, ph, reachableUpdate)
 }
 
 func (p *producer) processMPUnreach(attribute []byte, ph *bmp.PerPeerHeader, update *bgp.Update) {
-	nlri, err := bgp.UnmarshalMPUnReachNLRI(attribute, p.GetAddPathCapability(ph.GetTableKey()), update.HasSRv6Transposition())
+	nlri, err := bgp.UnmarshalMPUnReachNLRI(attribute, update.HasSRv6Transposition())
 	if err != nil {
 		glog.Errorf("failed to process MP_UNREACH_NLRI with error: %+v", err)
 		return
 	}
 	if unreach, ok := nlri.(*bgp.MPUnReachNLRI); ok {
-		unreach.PathIDs = p.pathIDState(ph.GetTableKey(), unreach.GetAFISAFIType())
+		unreach.PathIDs, _ = p.nlriState(ph, unreach.GetAFISAFIType())
 	}
 	p.processMPUpdate(nlri, DelPrefix, ph, withoutNHC(update))
 }

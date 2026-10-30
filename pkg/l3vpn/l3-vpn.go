@@ -17,8 +17,11 @@ var ErrEmptyNLRI = errors.New("NLRI length is 0")
 // Options gives the session and attribute context that RFC 8277 VPN NLRI
 // (AFI 1/2, SAFI 128 and the same layout in SAFI 76) is decoded in.
 type Options struct {
-	// PathID is set when ADD-PATH is negotiated: a 4-octet Path Identifier
-	// precedes the Length field (RFC 8277 §2.2, §2.3; RFC 7911 §3).
+	// PathIDs is the session's ADD-PATH state: with Path IDs a 4-octet Path
+	// Identifier precedes the Length field (RFC 8277 §2.2, §2.3; RFC 7911
+	// §3). See base.DecodeWithPathID.
+	PathIDs base.PathIDState
+	// PathID is the setting tried first while PathIDs is unknown.
 	PathID bool
 	// SRv6 is set when the label field carries SRv6 SID bits (RFC 9252 §4
 	// transposition, see bgp.Update.HasSRv6Transposition); exactly one label
@@ -35,8 +38,9 @@ type Options struct {
 	IPv6 bool
 }
 
-// UnmarshalL3VPNNLRI parses VPNv4/VPNv6 NLRI according to opts.
-// If parsing fails, it will try exactly once with the PathID flag flipped. No recursion...
+// UnmarshalL3VPNNLRI parses VPNv4/VPNv6 NLRI according to opts. Only while
+// the ADD-PATH state is unknown is a failed parse tried once more with the
+// PathID flag flipped.
 func UnmarshalL3VPNNLRI(b []byte, opts Options) (*base.MPNLRI, error) {
 	if glog.V(6) {
 		glog.Infof("L3VPN NLRI Raw: %s, options: %+v", tools.MessageHex(b), opts)
@@ -45,14 +49,11 @@ func UnmarshalL3VPNNLRI(b []byte, opts Options) (*base.MPNLRI, error) {
 		return nil, ErrEmptyNLRI
 	}
 
-	// First attempt with the provided pathID flag
-	if mp, err := parseLabelStack(b, opts); err == nil {
-		return mp, nil
-	}
-
-	// Single fallback attempt with flipped pathID
-	opts.PathID = !opts.PathID
-	return parseLabelStack(b, opts)
+	return base.DecodeWithPathID(opts.PathIDs, opts.PathID, func(pathID bool) (*base.MPNLRI, error) {
+		o := opts
+		o.PathID = pathID
+		return parseLabelStack(b, o)
+	})
 }
 
 // parseLabelStack picks the label field reading: the Compatibility field for

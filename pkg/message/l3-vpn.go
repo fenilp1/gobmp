@@ -64,7 +64,7 @@ func (p *producer) rdLabeledPrefixes(decode func() (*base.MPNLRI, error), nlri b
 			prfx.IsLocRIBFiltered = f
 		}
 		if prfx.IsLocRIB {
-			prfx.TableName = p.GetTableName(ph.GetPeerBGPIDString(), ph.GetPeerDistinguisherString())
+			prfx.TableName = p.GetTableName(ph)
 		}
 		return []L3VPNPrefix{prfx}, nil
 	}
@@ -127,7 +127,7 @@ func (p *producer) rdLabeledPrefixes(decode func() (*base.MPNLRI, error), nlri b
 			prfx.IsLocRIBFiltered = f
 		}
 		if prfx.IsLocRIB {
-			prfx.TableName = p.GetTableName(ph.GetPeerBGPIDString(), ph.GetPeerDistinguisherString())
+			prfx.TableName = p.GetTableName(ph)
 		}
 		prfx.Labels = make([]uint32, 0)
 		for _, l := range e.Label {

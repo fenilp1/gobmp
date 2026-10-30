@@ -186,7 +186,7 @@ func TestProcessMPUpdate_LS71_RouterIDWire(t *testing.T) {
 	attr = append(attr, lsNLRI(1, node)...)
 	attr = append(attr, lsNLRI(2, link)...)
 
-	nlri, err := bgp.UnmarshalMPReachNLRI(attr, false, map[int]bool{})
+	nlri, err := bgp.UnmarshalMPReachNLRI(attr, false)
 	if err != nil {
 		t.Fatalf("UnmarshalMPReachNLRI() error: %v", err)
 	}

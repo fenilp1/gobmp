@@ -25,12 +25,18 @@ type MPUnReachNLRI struct {
 	AddressFamilyID    uint16
 	SubAddressFamilyID uint8
 	WithdrawnRoutes    []byte
-	addPath            map[int]bool
 	SRv6               bool
-	// PathIDs is the table's ADD-PATH state for this AFI/SAFI; for labeled
-	// unicast it decides whether a failed parse may be retried with the Path
-	// ID flag flipped.
+	// PathIDs is the session's ADD-PATH state for this AFI/SAFI, set by the
+	// caller from the Peer Up: it says whether NLRI carry Path Identifiers
+	// (RFC 7911 §3), and only while it is unknown may a failed parse be
+	// retried with the Path ID flag flipped.
 	PathIDs base.PathIDState
+}
+
+// hasPathIDs reports whether the NLRI are known to carry Path Identifiers,
+// for the decoders that take the ADD-PATH setting as a bool.
+func (mp *MPUnReachNLRI) hasPathIDs() bool {
+	return mp.PathIDs == base.PathIDPresent
 }
 
 // GetAFISAFIType returns underlaying NLRI's type based on AFI/SAFI
@@ -58,8 +64,7 @@ func (mp *MPUnReachNLRI) IsNextHopIPv6() bool {
 // GetNLRI71 check for presence of NLRI 71 in the NLRI 15 NLRI data and if exists, instantiate NLRI71 object
 func (mp *MPUnReachNLRI) GetNLRI71() (*ls.NLRI71, error) {
 	if mp.AddressFamilyID == 16388 && mp.SubAddressFamilyID == 71 {
-		pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
-		nlri71, err := ls.UnmarshalLSNLRI71(mp.WithdrawnRoutes, pathID)
+		nlri71, err := ls.UnmarshalLSNLRI71(mp.WithdrawnRoutes, mp.hasPathIDs())
 		if err != nil {
 			return nil, err
 		}
@@ -73,8 +78,7 @@ func (mp *MPUnReachNLRI) GetNLRI71() (*ls.NLRI71, error) {
 // RFC 9552 wire format. Per RFC 9815 Section 5.1.1, it uses the BGP-LS encoding.
 func (mp *MPUnReachNLRI) GetNLRI80() (*ls.NLRI71, error) {
 	if mp.AddressFamilyID == 16388 && mp.SubAddressFamilyID == 80 {
-		pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
-		return ls.UnmarshalLSNLRI71(mp.WithdrawnRoutes, pathID)
+		return ls.UnmarshalLSNLRI71(mp.WithdrawnRoutes, mp.hasPathIDs())
 	}
 
 	return nil, NewNLRINotFoundError(mp.AddressFamilyID, mp.SubAddressFamilyID, "MP_UNREACH_NLRI")
@@ -84,8 +88,7 @@ func (mp *MPUnReachNLRI) GetNLRI80() (*ls.NLRI71, error) {
 // in the NLRI 15 NLRI data and if AFI/SAFI matches 16388/72 instantiates an NLRI72 object.
 func (mp *MPUnReachNLRI) GetNLRI72() (*ls.NLRI72, error) {
 	if mp.AddressFamilyID == 16388 && mp.SubAddressFamilyID == 72 {
-		pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
-		nlri72, err := ls.UnmarshalLSNLRI72(mp.WithdrawnRoutes, pathID)
+		nlri72, err := ls.UnmarshalLSNLRI72(mp.WithdrawnRoutes, mp.hasPathIDs())
 		if err != nil {
 			return nil, err
 		}
@@ -111,9 +114,8 @@ func (mp *MPUnReachNLRI) GetNLRI73() (*srpolicy.NLRI73, error) {
 // GetNLRIL3VPN check for presence of NLRI L3VPN AFI 1/2 and SAFI 128 in the NLRI 15 NLRI data and if exists, instantiate L3VPN object
 func (mp *MPUnReachNLRI) GetNLRIL3VPN() (*base.MPNLRI, error) {
 	if (mp.AddressFamilyID == 1 || mp.AddressFamilyID == 2) && mp.SubAddressFamilyID == 128 {
-		pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
 		nlri, err := l3vpn.UnmarshalL3VPNNLRI(mp.WithdrawnRoutes, l3vpn.Options{
-			PathID:   pathID,
+			PathIDs:  mp.PathIDs,
 			Withdraw: true,
 			IPv6:     mp.AddressFamilyID == 2,
 		})
@@ -134,9 +136,8 @@ func (mp *MPUnReachNLRI) GetNLRICT() (*base.MPNLRI, error) {
 	if (mp.AddressFamilyID != 1 && mp.AddressFamilyID != 2) || mp.SubAddressFamilyID != SAFIClassfulTransport {
 		return nil, NewNLRINotFoundError(mp.AddressFamilyID, mp.SubAddressFamilyID, "MP_UNREACH_NLRI")
 	}
-	pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
 	return l3vpn.UnmarshalL3VPNNLRI(mp.WithdrawnRoutes, l3vpn.Options{
-		PathID:   pathID,
+		PathIDs:  mp.PathIDs,
 		Withdraw: true,
 		IPv6:     mp.AddressFamilyID == 2,
 	})
@@ -171,8 +172,7 @@ func (mp *MPUnReachNLRI) GetNLRIVPLS() (*vpls.Route, error) {
 // GetNLRIUnicast check for presence of Unicast AFI 1 or 2 and SAFI 1 in the MP_UNREACH_NLRI data and if exists, instantiate Unicast object
 func (mp *MPUnReachNLRI) GetNLRIUnicast() (*base.MPNLRI, error) {
 	if (mp.AddressFamilyID == 1 || mp.AddressFamilyID == 2) && mp.SubAddressFamilyID == 1 {
-		pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
-		nlri, err := unicast.UnmarshalUnicastNLRI(mp.WithdrawnRoutes, pathID)
+		nlri, err := unicast.UnmarshalUnicastNLRI(mp.WithdrawnRoutes, mp.PathIDs)
 		if err != nil {
 			return nil, err
 		}
@@ -185,8 +185,7 @@ func (mp *MPUnReachNLRI) GetNLRIUnicast() (*base.MPNLRI, error) {
 // GetNLRIMulticast check for presence of NLRI Multicast AFI 1 or 2 and SAFI 2 in the NLRI 15 NLRI data and if exists, instantiate Multicast object
 func (mp *MPUnReachNLRI) GetNLRIMulticast() (*base.MPNLRI, error) {
 	if (mp.AddressFamilyID == 1 || mp.AddressFamilyID == 2) && mp.SubAddressFamilyID == 2 {
-		pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
-		nlri, err := multicast.UnmarshalMulticastNLRI(mp.WithdrawnRoutes, pathID)
+		nlri, err := multicast.UnmarshalMulticastNLRI(mp.WithdrawnRoutes, mp.PathIDs)
 		if err != nil {
 			return nil, err
 		}
@@ -199,10 +198,8 @@ func (mp *MPUnReachNLRI) GetNLRIMulticast() (*base.MPNLRI, error) {
 // GetNLRILU check for presence of Labeled Unicast AFI 1 or 2 and SAFI 4 in the MP_UNREACH_NLRI data and if exists, instantiate LU object
 func (mp *MPUnReachNLRI) GetNLRILU() (*base.MPNLRI, error) {
 	if (mp.AddressFamilyID == 1 || mp.AddressFamilyID == 2) && mp.SubAddressFamilyID == 4 {
-		pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
 		nlri, err := unicast.UnmarshalLUNLRI(mp.WithdrawnRoutes, unicast.Options{
 			PathIDs:  mp.PathIDs,
-			PathID:   pathID,
 			Withdraw: true,
 			IPv6:     mp.AddressFamilyID == 2,
 		})
@@ -286,21 +283,19 @@ func (mp *MPUnReachNLRI) GetNLRIRTC() (*rtc.Route, error) {
 // GetNLRIMUP checks whether MP_UNREACH_NLRI carries BGP-MUP NLRI (SAFI 85) and, if so, instantiates a MUP NLRI object from withdrawn routes.
 func (mp *MPUnReachNLRI) GetNLRIMUP() (*mup.Route, error) {
 	if (mp.AddressFamilyID == 1 || mp.AddressFamilyID == 2) && mp.SubAddressFamilyID == mup.SAFI {
-		pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
-		return mup.UnmarshalMUPNLRI(mp.WithdrawnRoutes, mp.AddressFamilyID == 2, pathID)
+		return mup.UnmarshalMUPNLRI(mp.WithdrawnRoutes, mp.AddressFamilyID == 2, mp.hasPathIDs())
 	}
 
 	return nil, NewNLRINotFoundError(mp.AddressFamilyID, mp.SubAddressFamilyID, "MP_UNREACH_NLRI")
 }
 
-// UnmarshalMPUnReachNLRI builds MP UnReach NLRI attributes
-func UnmarshalMPUnReachNLRI(b []byte, addPath map[int]bool, srv6 ...bool) (MPNLRI, error) {
+// UnmarshalMPUnReachNLRI builds MP UnReach NLRI attributes. The caller sets
+// PathIDs before decoding the NLRI.
+func UnmarshalMPUnReachNLRI(b []byte, srv6 ...bool) (MPNLRI, error) {
 	if glog.V(6) {
 		glog.Infof("MPUnReachNLRI Raw: %s", tools.MessageHex(b))
 	}
-	mp := MPUnReachNLRI{
-		addPath: addPath,
-	}
+	mp := MPUnReachNLRI{}
 	if len(srv6) > 0 {
 		mp.SRv6 = srv6[0]
 	}

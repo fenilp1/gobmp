@@ -16,20 +16,20 @@ import (
 func (p *producer) nlri(op int, ph *bmp.PerPeerHeader, update *bgp.Update) ([]*UnicastPrefix, error) {
 	var operation string
 	var routes []base.Route
-	// Use per-table AddPath capability
-	addPathCap := p.GetAddPathCapability(ph.GetTableKey())
-	pathID := addPathCap[bgp.NLRIMessageType(1, 1)]
+	// The NLRI and Withdrawn Routes fields carry IPv4 unicast routes
+	// (RFC 4760 §1), with the ADD-PATH state of AFI 1 SAFI 1.
+	pathIDs, _ := p.nlriState(ph, bgp.NLRIMessageType(1, 1))
 	switch op {
 	case 0:
 		operation = "add"
-		if r, err := base.UnmarshalRoutes(update.NLRI, pathID); err == nil {
+		if r, err := base.UnmarshalRoutes(update.NLRI, pathIDs); err == nil {
 			routes = r
 		} else {
 			return nil, fmt.Errorf("failed to unmarshal routes from NLRI with error: %w", err)
 		}
 	case 1:
 		operation = "del"
-		if r, err := base.UnmarshalRoutes(update.WithdrawnRoutes, pathID); err == nil {
+		if r, err := base.UnmarshalRoutes(update.WithdrawnRoutes, pathIDs); err == nil {
 			routes = r
 		} else {
 			return nil, fmt.Errorf("failed to unmarshal routes from NLRI with error: %w", err)
@@ -73,7 +73,7 @@ func (p *producer) nlri(op int, ph *bmp.PerPeerHeader, update *bgp.Update) ([]*U
 			prfx.IsLocRIBFiltered = f
 		}
 		if prfx.IsLocRIB {
-			prfx.TableName = p.GetTableName(ph.GetPeerBGPIDString(), ph.GetPeerDistinguisherString())
+			prfx.TableName = p.GetTableName(ph)
 		}
 		return []*UnicastPrefix{prfx}, nil
 	}
@@ -126,7 +126,7 @@ func (p *producer) nlri(op int, ph *bmp.PerPeerHeader, update *bgp.Update) ([]*U
 			prfx.IsLocRIBFiltered = f
 		}
 		if prfx.IsLocRIB {
-			prfx.TableName = p.GetTableName(ph.GetPeerBGPIDString(), ph.GetPeerDistinguisherString())
+			prfx.TableName = p.GetTableName(ph)
 		}
 
 		prfxs = append(prfxs, prfx)

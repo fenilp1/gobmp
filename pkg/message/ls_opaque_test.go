@@ -49,11 +49,11 @@ func TestProcessMPUpdateLSOpaque(t *testing.T) {
 			var err error
 			operation := AddPrefix
 			if tt.withdraw {
-				nlri, err = bgp.UnmarshalMPUnReachNLRI(append([]byte{0x40, 0x04, tt.safi}, tt.nlri...), map[int]bool{})
+				nlri, err = bgp.UnmarshalMPUnReachNLRI(append([]byte{0x40, 0x04, tt.safi}, tt.nlri...))
 				operation = DelPrefix
 			} else {
 				reach := append([]byte{0x40, 0x04, tt.safi, 0x04, 0xc0, 0x00, 0x02, 0x02, 0x00}, tt.nlri...)
-				nlri, err = bgp.UnmarshalMPReachNLRI(reach, false, map[int]bool{})
+				nlri, err = bgp.UnmarshalMPReachNLRI(reach, false)
 			}
 			if err != nil {
 				t.Fatalf("unmarshal MP NLRI error = %v", err)
@@ -104,7 +104,7 @@ func TestProcessMPUpdateLSOpaqueZeroLength(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			reach := append([]byte{0x40, 0x04, tt.safi, 0x04, 0xc0, 0x00, 0x02, 0x02, 0x00}, tt.nlri...)
-			nlri, err := bgp.UnmarshalMPReachNLRI(reach, false, map[int]bool{})
+			nlri, err := bgp.UnmarshalMPReachNLRI(reach, false)
 			if err != nil {
 				t.Fatalf("unmarshal MP NLRI error = %v", err)
 			}

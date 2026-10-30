@@ -8,7 +8,7 @@ func BenchmarkGetNLRICT(b *testing.B) {
 	attr := ctMPReach(1, []byte{192, 0, 2, 1}, ctV4NLRI)
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		mp, err := UnmarshalMPReachNLRI(attr, false, nil)
+		mp, err := UnmarshalMPReachNLRI(attr, false)
 		if err != nil {
 			b.Fatal(err)
 		}

@@ -113,15 +113,11 @@ func TestL3VPN_EoR_LocRIB(t *testing.T) {
 	p := NewProducer(&mockPublisher{}, false).(*producer)
 
 	ph := makePeerHeader(t, bmp.PeerType3, 0x00)
-	tableKey := ph.GetPeerBGPIDString() + ph.GetPeerDistinguisherString()
-	p.tableLock.Lock()
-	p.tableProperties[tableKey] = PerTableProperties{
-		addPathCapable: make(map[int]bool),
+	p.storeSession(ph, sessionState{
 		tableInfoTLVs: []bmp.InformationalTLV{
 			{InformationType: 3, Information: []byte("VRF-L3VPN-EoR")},
 		},
-	}
-	p.tableLock.Unlock()
+	})
 
 	nlri := &mockMPNLRI{
 		l3vpnErr: l3vpn.ErrEmptyNLRI,
@@ -329,7 +325,7 @@ func TestUnicast_ValidNLRI_Publishes(t *testing.T) {
 		0x00,                   // Reserved
 		0x18, 0xc0, 0xa8, 0x01, // /24 prefix: 192.168.1.0/24
 	}
-	nlri, err := bgp.UnmarshalMPReachNLRI(reachBytes, false, map[int]bool{})
+	nlri, err := bgp.UnmarshalMPReachNLRI(reachBytes, false)
 	if err != nil {
 		t.Fatalf("UnmarshalMPReachNLRI: %v", err)
 	}

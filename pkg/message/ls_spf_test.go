@@ -630,12 +630,12 @@ func TestProcessMPUpdateLSNLRI80RepeatedAFLinkTLV(t *testing.T) {
 			operation := AddPrefix
 			if tt.withdraw {
 				unreach := append([]byte{0x40, 0x04, tt.safi}, testLSLinkNLRI80(tt.afValues...)...)
-				nlri, err = bgp.UnmarshalMPUnReachNLRI(unreach, map[int]bool{})
+				nlri, err = bgp.UnmarshalMPUnReachNLRI(unreach)
 				operation = DelPrefix
 			} else {
 				reach := []byte{0x40, 0x04, tt.safi, 0x04, 0xc0, 0x00, 0x02, 0x02, 0x00}
 				reach = append(reach, testLSLinkNLRI80(tt.afValues...)...)
-				nlri, err = bgp.UnmarshalMPReachNLRI(reach, false, map[int]bool{})
+				nlri, err = bgp.UnmarshalMPReachNLRI(reach, false)
 			}
 			if err != nil {
 				t.Fatalf("unmarshal MP NLRI error = %v", err)
@@ -689,7 +689,7 @@ func TestProcessMPUpdateLSNLRI71(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			nlri, err := bgp.UnmarshalMPReachNLRI(tt.reach, false, map[int]bool{})
+			nlri, err := bgp.UnmarshalMPReachNLRI(tt.reach, false)
 			if err != nil {
 				t.Fatalf("UnmarshalMPReachNLRI() error = %v", err)
 			}

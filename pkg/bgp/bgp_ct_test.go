@@ -48,12 +48,13 @@ func ctMPUnreach(afi byte, withdrawn []byte) []byte {
 	return append([]byte{0x00, afi, SAFIClassfulTransport}, withdrawn...)
 }
 
-func decodeCTReach(t *testing.T, attr []byte, addPath map[int]bool) (MPNLRI, *base.MPNLRI) {
+func decodeCTReach(t *testing.T, attr []byte, pathIDs base.PathIDState) (MPNLRI, *base.MPNLRI) {
 	t.Helper()
-	mp, err := UnmarshalMPReachNLRI(attr, false, addPath)
+	mp, err := UnmarshalMPReachNLRI(attr, false)
 	if err != nil {
 		t.Fatalf("UnmarshalMPReachNLRI() error: %v", err)
 	}
+	mp.(*MPReachNLRI).PathIDs = pathIDs
 	nlri, err := mp.GetNLRICT()
 	if err != nil {
 		t.Fatalf("GetNLRICT() error: %v", err)
@@ -97,7 +98,7 @@ func TestNLRIMessageTypeClassfulTransport(t *testing.T) {
 }
 
 func TestGetNLRICTIPv4Reach(t *testing.T) {
-	mp, nlri := decodeCTReach(t, ctMPReach(1, []byte{192, 0, 2, 1}, ctV4NLRI), nil)
+	mp, nlri := decodeCTReach(t, ctMPReach(1, []byte{192, 0, 2, 1}, ctV4NLRI), base.PathIDUnknown)
 	if mp.GetAFISAFIType() != 38 || mp.IsIPv6NLRI() {
 		t.Fatalf("AFI/SAFI type = %d, IPv6 = %t, want 38, false", mp.GetAFISAFIType(), mp.IsIPv6NLRI())
 	}
@@ -120,7 +121,7 @@ func TestGetNLRICTIPv6Reach(t *testing.T) {
 		0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, // 2001:db8::5/128
 	}
-	mp, got := decodeCTReach(t, ctMPReach(2, nh, nlri), nil)
+	mp, got := decodeCTReach(t, ctMPReach(2, nh, nlri), base.PathIDUnknown)
 	if mp.GetAFISAFIType() != 39 || !mp.IsIPv6NLRI() || !mp.IsNextHopIPv6() {
 		t.Fatalf("AFI/SAFI type = %d, IPv6 NLRI = %t, IPv6 NH = %t", mp.GetAFISAFIType(), mp.IsIPv6NLRI(), mp.IsNextHopIPv6())
 	}
@@ -134,8 +135,7 @@ func TestGetNLRICTIPv6Reach(t *testing.T) {
 // precedes the Length field. RFC 9832 §7.6 recommends ADD-PATH for BGP CT.
 func TestGetNLRICTAddPath(t *testing.T) {
 	nlri := append([]byte{0x00, 0x00, 0x00, 0x05}, ctV4NLRI[:16]...)
-	addPath := map[int]bool{NLRIMessageType(1, SAFIClassfulTransport): true}
-	_, got := decodeCTReach(t, ctMPReach(1, []byte{192, 0, 2, 1}, nlri), addPath)
+	_, got := decodeCTReach(t, ctMPReach(1, []byte{192, 0, 2, 1}, nlri), base.PathIDPresent)
 	if len(got.NLRI) != 1 {
 		t.Fatalf("got %d NLRIs, want 1", len(got.NLRI))
 	}
@@ -146,10 +146,11 @@ func TestGetNLRICTAddPath(t *testing.T) {
 		0x78, 0x80, 0x00, 0x00, // Length 120, Compatibility 0x800000
 		0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x01,
 		0x0a, 0x00, 0x00, 0x01,
-	}), addPath)
+	}))
 	if err != nil {
 		t.Fatalf("UnmarshalMPUnReachNLRI() error: %v", err)
 	}
+	unreach.(*MPUnReachNLRI).PathIDs = base.PathIDPresent
 	w, err := unreach.GetNLRICT()
 	if err != nil {
 		t.Fatalf("GetNLRICT() error: %v", err)
@@ -163,7 +164,7 @@ func TestGetNLRICTWithdraw(t *testing.T) {
 	for _, compat := range [][]byte{{0x80, 0x00, 0x00}, {0x00, 0x00, 0x00}} {
 		withdrawn := append([]byte{0x78}, compat...)
 		withdrawn = append(withdrawn, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x01, 0x0a, 0x00, 0x00, 0x01)
-		mp, err := UnmarshalMPUnReachNLRI(ctMPUnreach(1, withdrawn), nil)
+		mp, err := UnmarshalMPUnReachNLRI(ctMPUnreach(1, withdrawn))
 		if err != nil {
 			t.Fatalf("UnmarshalMPUnReachNLRI() error: %v", err)
 		}
@@ -184,7 +185,7 @@ func TestGetNLRICTWithdraw(t *testing.T) {
 // An MP_UNREACH_NLRI with no withdrawn routes is the End-of-RIB marker
 // (RFC 4724 §2).
 func TestGetNLRICTEndOfRIB(t *testing.T) {
-	mp, err := UnmarshalMPUnReachNLRI(ctMPUnreach(2, nil), nil)
+	mp, err := UnmarshalMPUnReachNLRI(ctMPUnreach(2, nil))
 	if err != nil {
 		t.Fatalf("UnmarshalMPUnReachNLRI() error: %v", err)
 	}
@@ -224,7 +225,7 @@ func TestGetNLRICTNextHop(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mp, err := UnmarshalMPReachNLRI(ctMPReach(1, tt.nh, ctV4NLRI), false, nil)
+			mp, err := UnmarshalMPReachNLRI(ctMPReach(1, tt.nh, ctV4NLRI), false)
 			if err != nil {
 				t.Fatalf("UnmarshalMPReachNLRI() error: %v", err)
 			}
@@ -264,14 +265,14 @@ func TestGetNLRICTMalformed(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reach, err := UnmarshalMPReachNLRI(ctMPReach(1, []byte{192, 0, 2, 1}, tt.nlri), false, nil)
+			reach, err := UnmarshalMPReachNLRI(ctMPReach(1, []byte{192, 0, 2, 1}, tt.nlri), false)
 			if err != nil {
 				t.Fatalf("UnmarshalMPReachNLRI() error: %v", err)
 			}
 			if got, err := reach.GetNLRICT(); err == nil {
 				t.Errorf("MP_REACH GetNLRICT() = %+v, want an error", got)
 			}
-			unreach, err := UnmarshalMPUnReachNLRI(ctMPUnreach(1, tt.nlri), nil)
+			unreach, err := UnmarshalMPUnReachNLRI(ctMPUnreach(1, tt.nlri))
 			if err != nil {
 				t.Fatalf("UnmarshalMPUnReachNLRI() error: %v", err)
 			}

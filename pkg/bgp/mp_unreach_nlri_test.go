@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/sbezverk/gobmp/pkg/base"
 )
 
 // TestUnmarshalMPUnReachNLRI covers UnmarshalMPUnReachNLRI parse paths.
@@ -12,7 +14,6 @@ func TestUnmarshalMPUnReachNLRI(t *testing.T) {
 	tests := []struct {
 		name       string
 		input      []byte
-		addPath    map[int]bool
 		wantAFI    uint16
 		wantSAFI   uint8
 		wantRoutes int // expected len of WithdrawnRoutes
@@ -21,25 +22,21 @@ func TestUnmarshalMPUnReachNLRI(t *testing.T) {
 		{
 			name:    "empty input returns error",
 			input:   []byte{},
-			addPath: map[int]bool{},
 			wantErr: true,
 		},
 		{
 			name:    "1 byte input returns error",
 			input:   []byte{0x00},
-			addPath: map[int]bool{},
 			wantErr: true,
 		},
 		{
 			name:    "2 bytes input returns error",
 			input:   []byte{0x00, 0x01},
-			addPath: map[int]bool{},
 			wantErr: true,
 		},
 		{
 			name:       "IPv4 unicast withdrawal no prefixes",
 			input:      []byte{0x00, 0x01, 0x01},
-			addPath:    map[int]bool{},
 			wantAFI:    1,
 			wantSAFI:   1,
 			wantRoutes: 0,
@@ -48,7 +45,6 @@ func TestUnmarshalMPUnReachNLRI(t *testing.T) {
 			name: "IPv4 unicast withdrawal with prefix bytes",
 			// AFI=1, SAFI=1, then 4 bytes of withdrawn route data
 			input:      []byte{0x00, 0x01, 0x01, 0x18, 0xC0, 0xA8, 0x01},
-			addPath:    map[int]bool{},
 			wantAFI:    1,
 			wantSAFI:   1,
 			wantRoutes: 4,
@@ -56,7 +52,6 @@ func TestUnmarshalMPUnReachNLRI(t *testing.T) {
 		{
 			name:       "IPv6 unicast AFI=2 SAFI=1",
 			input:      []byte{0x00, 0x02, 0x01},
-			addPath:    map[int]bool{},
 			wantAFI:    2,
 			wantSAFI:   1,
 			wantRoutes: 0,
@@ -64,7 +59,6 @@ func TestUnmarshalMPUnReachNLRI(t *testing.T) {
 		{
 			name:       "L3VPN AFI=1 SAFI=128",
 			input:      []byte{0x00, 0x01, 0x80},
-			addPath:    map[int]bool{},
 			wantAFI:    1,
 			wantSAFI:   128,
 			wantRoutes: 0,
@@ -72,7 +66,6 @@ func TestUnmarshalMPUnReachNLRI(t *testing.T) {
 		{
 			name:       "EVPN AFI=25 SAFI=70",
 			input:      []byte{0x00, 0x19, 0x46},
-			addPath:    map[int]bool{},
 			wantAFI:    25,
 			wantSAFI:   70,
 			wantRoutes: 0,
@@ -80,7 +73,6 @@ func TestUnmarshalMPUnReachNLRI(t *testing.T) {
 		{
 			name:       "BGP-LS AFI=16388 SAFI=71",
 			input:      []byte{0x40, 0x04, 0x47},
-			addPath:    map[int]bool{},
 			wantAFI:    16388,
 			wantSAFI:   71,
 			wantRoutes: 0,
@@ -88,7 +80,7 @@ func TestUnmarshalMPUnReachNLRI(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			nlri, err := UnmarshalMPUnReachNLRI(tt.input, tt.addPath)
+			nlri, err := UnmarshalMPUnReachNLRI(tt.input)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -116,7 +108,7 @@ func TestUnmarshalMPUnReachNLRI(t *testing.T) {
 func TestUnmarshalMPUnReachNLRI_SRv6Flag(t *testing.T) {
 	// AFI=1, SAFI=128 (L3VPN)
 	input := []byte{0x00, 0x01, 0x80}
-	nlri, err := UnmarshalMPUnReachNLRI(input, map[int]bool{}, true)
+	nlri, err := UnmarshalMPUnReachNLRI(input, true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -125,7 +117,7 @@ func TestUnmarshalMPUnReachNLRI_SRv6Flag(t *testing.T) {
 		t.Error("expected SRv6 flag to be true")
 	}
 
-	nlri2, err := UnmarshalMPUnReachNLRI(input, map[int]bool{})
+	nlri2, err := UnmarshalMPUnReachNLRI(input)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -216,7 +208,6 @@ func TestMPUnReachNLRI_NLRINotFound(t *testing.T) {
 		AddressFamilyID:    1,
 		SubAddressFamilyID: 1,
 		WithdrawnRoutes:    []byte{},
-		addPath:            map[int]bool{},
 	}
 
 	notFound := &NLRINotFoundError{}
@@ -288,7 +279,6 @@ func TestMPUnReachNLRI_NLRINotFound(t *testing.T) {
 			AddressFamilyID:    1, // should be 16388
 			SubAddressFamilyID: 71,
 			WithdrawnRoutes:    []byte{},
-			addPath:            map[int]bool{},
 		}
 		_, err := mp71.GetNLRI71()
 		if !errors.As(err, &notFound) {
@@ -300,7 +290,6 @@ func TestMPUnReachNLRI_NLRINotFound(t *testing.T) {
 			AddressFamilyID:    16388, // should be 1 or 2
 			SubAddressFamilyID: 73,
 			WithdrawnRoutes:    []byte{},
-			addPath:            map[int]bool{},
 		}
 		_, err := mp73.GetNLRI73()
 		if !errors.As(err, &notFound) {
@@ -312,7 +301,6 @@ func TestMPUnReachNLRI_NLRINotFound(t *testing.T) {
 			AddressFamilyID:    1, // should be 16388
 			SubAddressFamilyID: 72,
 			WithdrawnRoutes:    []byte{},
-			addPath:            map[int]bool{},
 		}
 		_, err := mp72.GetNLRI72()
 		if !errors.As(err, &notFound) {
@@ -324,7 +312,6 @@ func TestMPUnReachNLRI_NLRINotFound(t *testing.T) {
 			AddressFamilyID:    16388,
 			SubAddressFamilyID: 71, // should be 72
 			WithdrawnRoutes:    []byte{},
-			addPath:            map[int]bool{},
 		}
 		_, err := mp72.GetNLRI72()
 		if !errors.As(err, &notFound) {
@@ -338,7 +325,7 @@ func TestMPUnReachNLRI_NLRINotFound(t *testing.T) {
 			AddressFamilyID:    16388,
 			SubAddressFamilyID: 72,
 			WithdrawnRoutes:    append(rd, nodeNLRI71Payload...),
-			addPath:            map[int]bool{72: false},
+			PathIDs:            base.PathIDAbsent,
 		}
 		nlri, err := mp72.GetNLRI72()
 		if err != nil {
@@ -390,7 +377,6 @@ func TestMPUnReachNLRI_GetNLRIRTC(t *testing.T) {
 				AddressFamilyID:    tt.afi,
 				SubAddressFamilyID: tt.safi,
 				WithdrawnRoutes:    tt.routes,
-				addPath:            map[int]bool{},
 			}
 			route, err := mp.GetNLRIRTC()
 			if tt.wantErr {
@@ -441,7 +427,6 @@ func TestMPUnReachNLRI_GetMCASTVPN(t *testing.T) {
 					10, 0, 0, 1, // Route Key Originating Router's IP Address
 					10, 0, 0, 2, // Originating Router's IP Address
 				},
-				addPath: map[int]bool{},
 			}
 			get := mp.GetNLRIMCASTVPN
 			if tt.safi == 129 {
@@ -508,7 +493,6 @@ func TestMPUnReachNLRI_GetFlowspecNLRI(t *testing.T) {
 				AddressFamilyID:    tt.afi,
 				SubAddressFamilyID: tt.safi,
 				WithdrawnRoutes:    []byte{},
-				addPath:            map[int]bool{},
 			}
 			_, err := mp.GetFlowspecNLRI()
 			if tt.wantErrMsg == "" && !tt.wantNotFound {
@@ -544,7 +528,6 @@ func TestMPUnReachNLRI_GetFlowspecNLRI_IPv6WithData(t *testing.T) {
 		AddressFamilyID:    2,
 		SubAddressFamilyID: 133,
 		WithdrawnRoutes:    []byte{0x07, 0x01, 0x20, 0x00, 0x20, 0x01, 0x0d, 0xb8},
-		addPath:            map[int]bool{},
 	}
 	nlri, err := mp.GetFlowspecNLRI()
 	if err != nil {
@@ -566,7 +549,6 @@ func TestMPUnReachNLRI_GetFlowspecNLRI_VPNWithData(t *testing.T) {
 			0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x01, // RD 100:1
 			0x01, 0x08, 0x0a, // Type1 Dest 10.0.0.0/8
 		},
-		addPath: map[int]bool{},
 	}
 	nlri, err := mp.GetFlowspecNLRI()
 	if err != nil {
@@ -655,7 +637,6 @@ func TestMPUnReachNLRI_GetAllFlowspecNLRI(t *testing.T) {
 				AddressFamilyID:    tt.afi,
 				SubAddressFamilyID: tt.safi,
 				WithdrawnRoutes:    tt.routes,
-				addPath:            map[int]bool{},
 			}
 			nlris, err := mp.GetAllFlowspecNLRI()
 			if tt.wantNotFound {
@@ -700,7 +681,6 @@ func TestMPUnReachNLRI_GetNLRIUnicast_match(t *testing.T) {
 		AddressFamilyID:    1,
 		SubAddressFamilyID: 1,
 		WithdrawnRoutes:    []byte{0x18, 0x0A, 0x0A, 0x0A},
-		addPath:            map[int]bool{},
 	}
 	nlri, err := mp.GetNLRIUnicast()
 	if err != nil {
@@ -726,7 +706,7 @@ func TestMPUnReachNLRI_GetNLRI71_NoAddPath(t *testing.T) {
 		AddressFamilyID:    16388,
 		SubAddressFamilyID: 71,
 		WithdrawnRoutes:    nodeNLRI71Bytes,
-		addPath:            map[int]bool{71: false},
+		PathIDs:            base.PathIDAbsent,
 	}
 	nlri, err := mp.GetNLRI71()
 	if err != nil {
@@ -747,7 +727,7 @@ func TestMPUnReachNLRI_GetNLRI71_WithAddPath(t *testing.T) {
 		AddressFamilyID:    16388,
 		SubAddressFamilyID: 71,
 		WithdrawnRoutes:    payload,
-		addPath:            map[int]bool{71: true},
+		PathIDs:            base.PathIDPresent,
 	}
 	nlri, err := mp.GetNLRI71()
 	if err != nil {

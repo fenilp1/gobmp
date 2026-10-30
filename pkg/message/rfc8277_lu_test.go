@@ -160,11 +160,14 @@ func TestLabeledUnicastRFC8277(t *testing.T) {
 		// Known on: NLRI without Path IDs are not reread without them.
 		{name: "v4 no Path ID, ADD-PATH known on", state: absent, addPath: true, afi: 1, nlri: cat([]byte{0x38, 0x00, 0x06, 0x41}, v4Host)},
 		{name: "v6 no Path ID, ADD-PATH known on", state: absent, addPath: true, afi: 2, nlri: cat([]byte{0x58, 0x00, 0x06, 0x41}, v6Net)},
-		// ADD-PATH in one direction only (RFC 7911 §5): the table may hold
-		// received or sent routes, so the state is unknown and the flip is
-		// allowed. Sent Receive, received Send: Path IDs on received routes.
+		// ADD-PATH in one direction only (RFC 7911 §5): this Adj-RIB-In
+		// holds routes from the peer, so they carry Path IDs only if the
+		// peer (received OPEN) advertised Send and the router (sent OPEN)
+		// Receive.
 		{name: "v4 Path ID, ADD-PATH receive/send", state: absent, apSent: 1, apRecv: 2, afi: 1, nlri: cat(pathID, []byte{0x38, 0x00, 0x06, 0x41}, v4Host), labels: []uint32{100}, prefix: "10.0.0.1", len: 32, pathID: 7},
 		{name: "v4 no Path ID, ADD-PATH send/both", state: absent, apSent: 2, apRecv: 3, afi: 1, nlri: cat([]byte{0x38, 0x00, 0x06, 0x41}, v4Host), labels: []uint32{100}, prefix: "10.0.0.1", len: 32},
+		{name: "v4 zero Length, ADD-PATH send/both", state: absent, apSent: 2, apRecv: 3, afi: 1, nlri: zeroLength},
+		{name: "v4 no Path ID, ADD-PATH receive/send", state: absent, apSent: 1, apRecv: 2, afi: 1, nlri: cat([]byte{0x38, 0x00, 0x06, 0x41}, v4Host)},
 		// RFC 7911 §4: a Send/Receive value other than 1-3 is ignored, so
 		// the AFI/SAFI counts as not listed and has no Path IDs.
 		{name: "v4 no Path ID, ADD-PATH value 7", state: absent, apSent: 7, apRecv: 7, afi: 1, nlri: cat([]byte{0x38, 0x00, 0x06, 0x41}, v4Host), labels: []uint32{100}, prefix: "10.0.0.1", len: 32},

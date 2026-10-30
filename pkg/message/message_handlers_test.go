@@ -130,7 +130,7 @@ func TestMVPN_RIBFlags_AllFive(t *testing.T) {
 		// Originator IP (4 bytes)
 		0x0a, 0x00, 0x00, 0x01,
 	}
-	nlri2, err := bgp.UnmarshalMPReachNLRI(reachWithRoute, false, map[int]bool{})
+	nlri2, err := bgp.UnmarshalMPReachNLRI(reachWithRoute, false)
 	if err != nil {
 		t.Fatalf("UnmarshalMPReachNLRI: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestMCASTVPN_Nexthop(t *testing.T) {
 		// Originator IP (4 bytes)
 		0x0a, 0x00, 0x00, 0x01,
 	}
-	nlri, err := bgp.UnmarshalMPReachNLRI(reachWithRoute, false, map[int]bool{})
+	nlri, err := bgp.UnmarshalMPReachNLRI(reachWithRoute, false)
 	if err != nil {
 		t.Fatalf("UnmarshalMPReachNLRI: %v", err)
 	}
@@ -207,15 +207,11 @@ func TestL3VPN_TableName(t *testing.T) {
 
 	phLocRIB := makePeerHeader(t, bmp.PeerType3, 0x00)
 
-	tableKey := phLocRIB.GetPeerBGPIDString() + phLocRIB.GetPeerDistinguisherString()
-	p.tableLock.Lock()
-	p.tableProperties[tableKey] = PerTableProperties{
-		addPathCapable: make(map[int]bool),
+	p.storeSession(phLocRIB, sessionState{
 		tableInfoTLVs: []bmp.InformationalTLV{
 			{InformationType: 3, Information: []byte("VRF-L3VPN")},
 		},
-	}
-	p.tableLock.Unlock()
+	})
 
 	// L3VPN (AFI=1, SAFI=128) with one route
 	reachBytes := []byte{
@@ -232,7 +228,7 @@ func TestL3VPN_TableName(t *testing.T) {
 		0x00, 0x01, 0x01, // Label: 16 (bottom-of-stack)
 		0x00, 0x02, 0x00, 0x00, 0xFD, 0xE8, 0x00, 0x64, // RD: 2:65000:100
 	}
-	nlri, err := bgp.UnmarshalMPReachNLRI(reachBytes, false, map[int]bool{})
+	nlri, err := bgp.UnmarshalMPReachNLRI(reachBytes, false)
 	if err != nil {
 		t.Fatalf("UnmarshalMPReachNLRI: %v", err)
 	}
@@ -259,15 +255,11 @@ func TestUnicast_TableName(t *testing.T) {
 
 	phLocRIB := makePeerHeader(t, bmp.PeerType3, 0x00)
 
-	tableKey := phLocRIB.GetPeerBGPIDString() + phLocRIB.GetPeerDistinguisherString()
-	p.tableLock.Lock()
-	p.tableProperties[tableKey] = PerTableProperties{
-		addPathCapable: make(map[int]bool),
+	p.storeSession(phLocRIB, sessionState{
 		tableInfoTLVs: []bmp.InformationalTLV{
 			{InformationType: 3, Information: []byte("default")},
 		},
-	}
-	p.tableLock.Unlock()
+	})
 
 	// Unicast (AFI=1, SAFI=1) with one /24 prefix
 	reachBytes := []byte{
@@ -278,7 +270,7 @@ func TestUnicast_TableName(t *testing.T) {
 		0x00,                   // Reserved
 		0x18, 0xc0, 0xa8, 0x01, // /24 prefix: 192.168.1.0/24
 	}
-	nlri, err := bgp.UnmarshalMPReachNLRI(reachBytes, false, map[int]bool{})
+	nlri, err := bgp.UnmarshalMPReachNLRI(reachBytes, false)
 	if err != nil {
 		t.Fatalf("UnmarshalMPReachNLRI: %v", err)
 	}
@@ -305,15 +297,11 @@ func TestBaseNLRI_TableName(t *testing.T) {
 
 	phLocRIB := makePeerHeader(t, bmp.PeerType3, 0x00)
 
-	tableKey := phLocRIB.GetPeerBGPIDString() + phLocRIB.GetPeerDistinguisherString()
-	p.tableLock.Lock()
-	p.tableProperties[tableKey] = PerTableProperties{
-		addPathCapable: make(map[int]bool),
+	p.storeSession(phLocRIB, sessionState{
 		tableInfoTLVs: []bmp.InformationalTLV{
 			{InformationType: 3, Information: []byte("global")},
 		},
-	}
-	p.tableLock.Unlock()
+	})
 
 	// Simulate legacy IPv4 update with one /24 prefix in NLRI field
 	update := &bgp.Update{
@@ -369,15 +357,11 @@ func TestMVPN_LocRIB_TableName(t *testing.T) {
 
 	phLocRIB := makePeerHeader(t, bmp.PeerType3, 0x00)
 
-	tableKey := phLocRIB.GetPeerBGPIDString() + phLocRIB.GetPeerDistinguisherString()
-	p.tableLock.Lock()
-	p.tableProperties[tableKey] = PerTableProperties{
-		addPathCapable: make(map[int]bool),
+	p.storeSession(phLocRIB, sessionState{
 		tableInfoTLVs: []bmp.InformationalTLV{
 			{InformationType: 3, Information: []byte("VRF-MVPN")},
 		},
-	}
-	p.tableLock.Unlock()
+	})
 
 	// MVPN Type 1 route with LocRIB peer
 	reachBytes := []byte{
@@ -391,7 +375,7 @@ func TestMVPN_LocRIB_TableName(t *testing.T) {
 		0x00, 0x02, 0x00, 0x00, 0xFD, 0xE8, 0x00, 0x64, // RD
 		0x0a, 0x00, 0x00, 0x01, // Originator IP
 	}
-	nlri, err := bgp.UnmarshalMPReachNLRI(reachBytes, false, map[int]bool{})
+	nlri, err := bgp.UnmarshalMPReachNLRI(reachBytes, false)
 	if err != nil {
 		t.Fatalf("UnmarshalMPReachNLRI: %v", err)
 	}
@@ -424,7 +408,7 @@ func TestProcessMPUpdate_L3VPN_EoR(t *testing.T) {
 		0x00, 0x01, // AFI: 1
 		0x80, // SAFI: 128
 	}
-	nlri, err := bgp.UnmarshalMPUnReachNLRI(unreachBytes, map[int]bool{})
+	nlri, err := bgp.UnmarshalMPUnReachNLRI(unreachBytes)
 	if err != nil {
 		t.Fatalf("UnmarshalMPUnReachNLRI: %v", err)
 	}
@@ -476,15 +460,11 @@ func TestUnicast_EoR_LocRIB(t *testing.T) {
 	p := NewProducer(&mockPublisher{}, false).(*producer)
 
 	ph := makePeerHeader(t, bmp.PeerType3, 0x00)
-	tableKey := ph.GetPeerBGPIDString() + ph.GetPeerDistinguisherString()
-	p.tableLock.Lock()
-	p.tableProperties[tableKey] = PerTableProperties{
-		addPathCapable: make(map[int]bool),
+	p.storeSession(ph, sessionState{
 		tableInfoTLVs: []bmp.InformationalTLV{
 			{InformationType: 3, Information: []byte("VRF-Test")},
 		},
-	}
-	p.tableLock.Unlock()
+	})
 
 	update := &bgp.Update{BaseAttributes: &bgp.BaseAttributes{}}
 
@@ -604,7 +584,7 @@ func TestProcessMPUpdate_UnicastBranches(t *testing.T) {
 			ph := makePeerHeader(t, bmp.PeerType0, 0x00)
 			update := &bgp.Update{BaseAttributes: &bgp.BaseAttributes{}}
 
-			nlri, err := bgp.UnmarshalMPReachNLRI(tt.reach, false, map[int]bool{})
+			nlri, err := bgp.UnmarshalMPReachNLRI(tt.reach, false)
 			if err != nil {
 				t.Fatalf("UnmarshalMPReachNLRI: %v", err)
 			}
@@ -658,7 +638,7 @@ func TestProcessMPUpdate_MPUnreachEORTopics(t *testing.T) {
 			ph := makePeerHeader(t, bmp.PeerType0, 0x00)
 			update := &bgp.Update{BaseAttributes: &bgp.BaseAttributes{}}
 
-			nlri, err := bgp.UnmarshalMPUnReachNLRI(tt.unreach, map[int]bool{})
+			nlri, err := bgp.UnmarshalMPUnReachNLRI(tt.unreach)
 			if err != nil {
 				t.Fatalf("UnmarshalMPUnReachNLRI: %v", err)
 			}
@@ -718,7 +698,7 @@ func TestProcessMPUpdate_UnknownAFISAFI(t *testing.T) {
 		0x00, 0x63, // AFI: 99
 		0x63, // SAFI: 99
 	}
-	nlri, err := bgp.UnmarshalMPUnReachNLRI(unreachBytes, map[int]bool{})
+	nlri, err := bgp.UnmarshalMPUnReachNLRI(unreachBytes)
 	if err != nil {
 		t.Fatalf("UnmarshalMPUnReachNLRI: %v", err)
 	}

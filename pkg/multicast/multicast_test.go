@@ -279,7 +279,7 @@ func TestUnmarshalMulticastNLRI(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalMulticastNLRI(tt.input, tt.pathID)
+			got, err := UnmarshalMulticastNLRI(tt.input, knownPathIDs(tt.pathID))
 			if err != nil {
 				t.Fatalf("test failed with error: %+v", err)
 			}
@@ -307,7 +307,7 @@ func TestUnmarshalMulticastNLRIErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalMulticastNLRI(tt.input, tt.pathID)
+			got, err := UnmarshalMulticastNLRI(tt.input, knownPathIDs(tt.pathID))
 			if (err != nil) != tt.wantErr {
 				t.Errorf("UnmarshalMulticastNLRI() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -317,4 +317,12 @@ func TestUnmarshalMulticastNLRIErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+// knownPathIDs returns the known ADD-PATH state for a Path ID setting.
+func knownPathIDs(pathID bool) base.PathIDState {
+	if pathID {
+		return base.PathIDPresent
+	}
+	return base.PathIDAbsent
 }

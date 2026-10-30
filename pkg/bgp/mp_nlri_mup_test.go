@@ -1,6 +1,10 @@
 package bgp
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/sbezverk/gobmp/pkg/base"
+)
 
 // mupISDNLRI is an Interwork Segment Discovery route for RD 100:100 and
 // prefix 10.10.10.0/24.
@@ -61,16 +65,14 @@ func TestMPUnReachNLRIGetNLRIMUP(t *testing.T) {
 	}
 }
 
-// The Add Path capability map is keyed by NLRI message type, so a session
-// that negotiated Add Path for the BGP-MUP SAFI reaches the MUP parser.
+// With Path IDs known present for the BGP-MUP SAFI, the MUP parser reads
+// them (RFC 7911 §3).
 func TestMPReachNLRIGetNLRIMUPAddPath(t *testing.T) {
 	mp := &MPReachNLRI{
 		AddressFamilyID:    1,
 		SubAddressFamilyID: 85,
 		NLRI:               append([]byte{0x00, 0x00, 0x00, 0x07}, mupISDNLRI...),
-		addPath: map[int]bool{
-			NLRIMessageType(1, 85): true,
-		},
+		PathIDs:            base.PathIDPresent,
 	}
 	route, err := mp.GetNLRIMUP()
 	if err != nil {

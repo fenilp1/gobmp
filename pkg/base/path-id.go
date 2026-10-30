@@ -1,13 +1,12 @@
 package base
 
-// PathIDState says whether NLRI of an AFI/SAFI in a table carry the 4-octet
-// ADD-PATH Path Identifier (RFC 7911 §3).
+// PathIDState says whether NLRI of an AFI/SAFI in a BMP Route Monitoring
+// message carry the 4-octet ADD-PATH Path Identifier (RFC 7911 §3).
 type PathIDState uint8
 
 const (
 	// PathIDUnknown means the state is not known: no Peer Up was seen for
-	// the table, or ADD-PATH is negotiated in one direction only, so Path
-	// IDs depend on whether the RIB holds received or sent routes.
+	// the session.
 	PathIDUnknown PathIDState = iota
 	// PathIDAbsent means no NLRI carries a Path Identifier.
 	PathIDAbsent

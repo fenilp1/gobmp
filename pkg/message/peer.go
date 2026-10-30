@@ -5,8 +5,6 @@ import (
 	"net"
 
 	"github.com/golang/glog"
-	"github.com/sbezverk/gobmp/pkg/base"
-	"github.com/sbezverk/gobmp/pkg/bgp"
 	"github.com/sbezverk/gobmp/pkg/bmp"
 )
 
@@ -70,53 +68,16 @@ func (p *producer) producePeerMessage(op int, msg bmp.Message, peerID bmp.PeerId
 			m.LocalASN = lasn
 		}
 
-		// Create per-table properties for this VRF
-		// Per RFC 9069: Each table identified by BGP-ID + Peer Distinguisher
-		// Per RFC 7911: AddPath capability is per BGP session (not global)
-		p.tableLock.Lock()
-		ptp := PerTableProperties{
-			addPathCapable:    make(map[int]bool),
-			multiLabelCapable: make(map[int]bool),
-		}
-
-		// Check AddPath capability for this specific peer/table
-		// Only enable AddPath for AFI/SAFI types where BOTH peers support it
-		if lAddPath := peerUpMsg.SentOpen.AddPathCapability(); len(lAddPath) != 0 {
-			if rAddPath := peerUpMsg.ReceivedOpen.AddPathCapability(); len(rAddPath) != 0 {
-				for k := range lAddPath {
-					if capable, ok := rAddPath[k]; ok {
-						ptp.addPathCapable[k] = capable
-					}
-				}
-			}
-		}
-
-		ptp.pathIDState = pathIDStates(peerUpMsg.SentOpen, peerUpMsg.ReceivedOpen, msg.PeerHeader.PeerType == bmp.PeerType3)
-
-		// RFC 8277 §2.3: multiple labels are used for an AFI/SAFI only when
-		// both OPEN messages carry the Multiple Labels Capability for it
-		rMultiLabel := peerUpMsg.ReceivedOpen.MultiLabelCapability()
-		for k, capable := range peerUpMsg.SentOpen.MultiLabelCapability() {
-			if capable && rMultiLabel[k] {
-				ptp.multiLabelCapable[k] = true
-			}
-		}
-
-		// Copy table informational TLVs (includes Table Name per RFC 9069 Section 5)
-		ptp.tableInfoTLVs = make([]bmp.InformationalTLV, len(peerUpMsg.Information))
-		copy(ptp.tableInfoTLVs, peerUpMsg.Information)
-
-		// Store properties for this table
-		p.tableProperties[msg.PeerHeader.GetTableKey()] = ptp
-		p.tableLock.Unlock()
+		st := newSessionState(peerUpMsg)
+		p.storeSession(msg.PeerHeader, st)
 
 		m.AdvCapabilities = peerUpMsg.SentOpen.GetCapabilities()
 		m.RcvCapabilities = peerUpMsg.ReceivedOpen.GetCapabilities()
 		if glog.V(6) {
-			glog.Infof("producer for speaker ip: %s table: %s add path: %+v",
+			glog.Infof("producer for speaker ip: %s session: %s add path sent: %+v received: %+v",
 				peerID.SpeakerIP,
-				msg.PeerHeader.GetTableKey(),
-				ptp.addPathCapable)
+				msg.PeerHeader.SessionKey(),
+				st.addPathSent, st.addPathRecv)
 		}
 	} else {
 		peerDownMsg, ok := msg.Payload.(*bmp.PeerDownMessage)
@@ -139,11 +100,9 @@ func (p *producer) producePeerMessage(op int, msg bmp.Message, peerID bmp.PeerId
 		m.InfoData = make([]byte, len(peerDownMsg.Data))
 		copy(m.InfoData, peerDownMsg.Data)
 
-		// Clean up table properties when peer goes down
-		// This prevents memory leaks and ensures stale data isn't used
-		p.tableLock.Lock()
-		delete(p.tableProperties, msg.PeerHeader.GetTableKey())
-		p.tableLock.Unlock()
+		// Forget the session, so its state is neither leaked nor applied to
+		// another session.
+		p.deleteSession(msg.PeerHeader)
 	}
 
 	return &m, nil
@@ -177,31 +136,4 @@ func speakerAddress(localIP, connIP string) string {
 func isSpecificAddress(s string) bool {
 	ip := net.ParseIP(s)
 	return ip != nil && !ip.IsUnspecified()
-}
-
-// pathIDStates returns, per NLRI type listed in either OPEN, whether NLRI
-// carry ADD-PATH Path Identifiers. They flow from a speaker that advertised
-// Send to one that advertised Receive (RFC 7911 §4, §5). A table holds the
-// routes received from the peer and, for Adj-RIB-Out (RFC 8671), those sent
-// to it, so ADD-PATH in one direction only leaves the state unknown. For a
-// Loc-RIB the presence of the capability means Path IDs are used (RFC 9069
-// §5.2). NLRI types in neither OPEN have no Path IDs.
-func pathIDStates(sent, recv *bgp.OpenMessage, locRIB bool) map[int]base.PathIDState {
-	local, remote := sent.AddPathSendReceive(), recv.AddPathSendReceive()
-	m := make(map[int]base.PathIDState)
-	for _, caps := range []map[int]uint8{local, remote} {
-		for t := range caps {
-			in := remote[t]&2 != 0 && local[t]&1 != 0
-			out := local[t]&2 != 0 && remote[t]&1 != 0
-			switch {
-			case locRIB || in && out:
-				m[t] = base.PathIDPresent
-			case !in && !out:
-				m[t] = base.PathIDAbsent
-			default:
-				m[t] = base.PathIDUnknown
-			}
-		}
-	}
-	return m
 }

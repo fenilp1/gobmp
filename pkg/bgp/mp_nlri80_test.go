@@ -50,7 +50,7 @@ func TestMPReachNLRIGetNLRI80WithAddPath(t *testing.T) {
 		AddressFamilyID:    16388,
 		SubAddressFamilyID: 80,
 		NLRI:               append(pathID, bgpLSSPFNodeNLRI(base.Direct)...),
-		addPath:            map[int]bool{80: true},
+		PathIDs:            base.PathIDPresent,
 	}
 
 	nlri, err := mp.GetNLRI80()

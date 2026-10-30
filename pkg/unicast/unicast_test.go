@@ -176,7 +176,7 @@ func TestUnmarshalUnicastNLRI(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalUnicastNLRI(tt.input, tt.pathID)
+			got, err := UnmarshalUnicastNLRI(tt.input, knownPathIDs(tt.pathID))
 			if err != nil {
 				t.Fatalf("test failed with error: %+v", err)
 			}
@@ -392,4 +392,12 @@ func TestUnmarshalLUNLRI_PrefixLengthExceeds128(t *testing.T) {
 	if !strings.Contains(err.Error(), "outside 0-128") {
 		t.Errorf("expected error about exceeding 128 bits, got: %v", err)
 	}
+}
+
+// knownPathIDs returns the known ADD-PATH state for a Path ID setting.
+func knownPathIDs(pathID bool) base.PathIDState {
+	if pathID {
+		return base.PathIDPresent
+	}
+	return base.PathIDAbsent
 }

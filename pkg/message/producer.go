@@ -16,19 +16,93 @@ const (
 	peerDown
 )
 
-// PerTableProperties holds per-VRF/per-table properties
-// Each VRF (identified by BGP-ID + Peer Distinguisher) has its own:
-// - AddPath capability map (per AFI/SAFI)
-// - Table Informational TLVs (including Table Name per RFC 9069)
-type PerTableProperties struct {
-	addPathCapable map[int]bool
-	// multiLabelCapable holds the NLRI types for which the Multiple Labels
-	// Capability was both sent and received (RFC 8277 §2.3)
-	multiLabelCapable map[int]bool
-	// pathIDState holds the ADD-PATH state of the NLRI types listed in
-	// either OPEN message; see pathIDStates
-	pathIDState   map[int]base.PathIDState
+// sessionState holds what the Peer Up of one monitored session, keyed by
+// bmp.PerPeerHeader.SessionKey, says about decoding its Route Monitoring
+// messages. The maps are not changed once stored, so a copy may be read
+// without the lock.
+type sessionState struct {
+	// addPathSent and addPathRecv hold the ADD-PATH Send/Receive value per
+	// NLRI type (RFC 7911 §4) of the Peer Up sent OPEN, the monitored
+	// router's, and received OPEN, the peer's (RFC 7854 §4.10).
+	addPathSent, addPathRecv map[int]uint8
+	// multiLabel holds the NLRI types for which the Multiple Labels
+	// Capability was both sent and received (RFC 8277 §2.3).
+	multiLabel map[int]bool
+	// tableInfoTLVs holds the Peer Up Information TLVs, which include the
+	// VRF/Table Name (RFC 9069 §5.2.1).
 	tableInfoTLVs []bmp.InformationalTLV
+}
+
+// ADD-PATH Send/Receive bits (RFC 7911 §4).
+const (
+	addPathReceive = 1
+	addPathSend    = 2
+)
+
+// newSessionState returns the state a Peer Up sets up.
+func newSessionState(peerUp *bmp.PeerUpMessage) sessionState {
+	s := sessionState{
+		addPathSent: peerUp.SentOpen.AddPathSendReceive(),
+		addPathRecv: peerUp.ReceivedOpen.AddPathSendReceive(),
+		multiLabel:  make(map[int]bool),
+	}
+	recv := peerUp.ReceivedOpen.MultiLabelCapability()
+	for t, capable := range peerUp.SentOpen.MultiLabelCapability() {
+		if capable && recv[t] {
+			s.multiLabel[t] = true
+		}
+	}
+	s.tableInfoTLVs = make([]bmp.InformationalTLV, len(peerUp.Information))
+	copy(s.tableInfoTLVs, peerUp.Information)
+	return s
+}
+
+// mergeLocRIB returns the state of a Loc-RIB instance conveyed by more than
+// one emulated peer, each with its own Peer Up for some address families
+// (RFC 9069 §6.1.1): the capabilities of both, and the TLVs of the newer.
+func mergeLocRIB(old, s sessionState) sessionState {
+	union := func(a, b map[int]uint8) map[int]uint8 {
+		m := make(map[int]uint8, len(a)+len(b))
+		for t, v := range a {
+			m[t] |= v
+		}
+		for t, v := range b {
+			m[t] |= v
+		}
+		return m
+	}
+	s.addPathSent = union(old.addPathSent, s.addPathSent)
+	s.addPathRecv = union(old.addPathRecv, s.addPathRecv)
+	multiLabel := make(map[int]bool, len(old.multiLabel)+len(s.multiLabel))
+	for _, m := range []map[int]bool{old.multiLabel, s.multiLabel} {
+		for t := range m {
+			multiLabel[t] = true
+		}
+	}
+	s.multiLabel = multiLabel
+	return s
+}
+
+// pathIDs returns whether NLRI of type nlriType in a Route Monitoring message
+// with per-peer header ph carry ADD-PATH Path Identifiers. They do on routes
+// from a speaker that advertised Send to one that advertised Receive (RFC
+// 7911 §5): an Adj-RIB-In holds routes from the peer to the monitored router,
+// an Adj-RIB-Out (O flag, RFC 8671 §4) routes from the router to the peer.
+// For a Loc-RIB the capability's presence is enough (RFC 9069 §5.2).
+func (s sessionState) pathIDs(ph *bmp.PerPeerHeader, nlriType int) base.PathIDState {
+	router, peer := s.addPathSent[nlriType], s.addPathRecv[nlriType]
+	var present bool
+	if ph.PeerType == bmp.PeerType3 {
+		present = router != 0 || peer != 0
+	} else if out, _ := ph.IsAdjRIBOut(); out {
+		present = router&addPathSend != 0 && peer&addPathReceive != 0
+	} else {
+		present = peer&addPathSend != 0 && router&addPathReceive != 0
+	}
+	if present {
+		return base.PathIDPresent
+	}
+	return base.PathIDAbsent
 }
 
 // Config holds producer configuration options
@@ -57,11 +131,10 @@ type producer struct {
 	// so they can exit cleanly if the producer is shut down before any PeerUp
 	// arrives (e.g. the connection drops before BGP session establishment).
 	stopCh chan struct{}
-	// Per-VRF table properties tracking (replaces global addPathCapable)
-	// Key format: BGP-ID + Peer Distinguisher (e.g., "10.0.0.10:0")
-	// Per RFC 9069 Section 4: uniquely identifies each Loc-RIB instance
-	tableLock       sync.RWMutex
-	tableProperties map[string]PerTableProperties
+	// sessions holds the state of each monitored session, keyed by
+	// bmp.PerPeerHeader.SessionKey, from its Peer Up to its Peer Down.
+	sessionLock sync.RWMutex
+	sessions    map[string]sessionState
 	// If splitAF is set to true, ipv4 and ipv6 messages will go into separate topics
 	splitAF bool
 	// collectorAdminID is the collector identifier string for OpenBMP binary header
@@ -249,92 +322,75 @@ func (p *producer) SetConfig(config *Config) error {
 	return nil
 }
 
-// GetAddPathCapability returns AddPath capability map for a specific table
-// Returns nil if table doesn't exist (caller must handle gracefully)
-// Accessing nil map in Go returns zero value (false) for all keys, which is safe
-// Per RFC 7911 Section 3: AddPath capability is advertised per BGP session
-func (p *producer) GetAddPathCapability(tableKey string) map[int]bool {
-	p.tableLock.RLock()
-	defer p.tableLock.RUnlock()
-
-	if props, ok := p.tableProperties[tableKey]; ok {
-		return props.addPathCapable
+// storeSession records the state set up by the Peer Up with header ph,
+// replacing that of an earlier Peer Up for the session, or for a Loc-RIB
+// adding to it (RFC 9069 §6.1.1).
+func (p *producer) storeSession(ph *bmp.PerPeerHeader, s sessionState) {
+	key := ph.SessionKey()
+	p.sessionLock.Lock()
+	defer p.sessionLock.Unlock()
+	if old, ok := p.sessions[key]; ok && ph.PeerType == bmp.PeerType3 {
+		s = mergeLocRIB(old, s)
 	}
-
-	// Return nil - parsers will treat nil map as "no AddPath capability"
-	// This is safe: accessing nil map returns zero value (false)
-	return nil
+	p.sessions[key] = s
 }
 
-// GetMultiLabelCapability returns the Multiple Labels capability map for a
-// specific table, nil if the table doesn't exist (RFC 8277 §2.3).
-func (p *producer) GetMultiLabelCapability(tableKey string) map[int]bool {
-	p.tableLock.RLock()
-	defer p.tableLock.RUnlock()
-
-	return p.tableProperties[tableKey].multiLabelCapable
+// deleteSession removes the state of the session that the Peer Down with
+// header ph ends; for a Loc-RIB, that of all its emulated peers, which share
+// the header.
+func (p *producer) deleteSession(ph *bmp.PerPeerHeader) {
+	key := ph.SessionKey()
+	p.sessionLock.Lock()
+	defer p.sessionLock.Unlock()
+	delete(p.sessions, key)
 }
 
-// multiLabelState returns the Multiple Labels Capability state of NLRI type
-// nlriType in a table: unknown if no Peer Up was seen for the table.
-func (p *producer) multiLabelState(tableKey string, nlriType int) base.MultiLabel {
-	caps := p.GetMultiLabelCapability(tableKey)
-	switch {
-	case caps == nil:
-		return base.MultiLabelUnknown
-	case caps[nlriType]:
-		return base.MultiLabelConfirmed
-	default:
-		return base.MultiLabelAbsent
-	}
+// session returns the state of the session a message with header ph belongs
+// to, and false if no Peer Up was seen for it.
+func (p *producer) session(ph *bmp.PerPeerHeader) (sessionState, bool) {
+	key := ph.SessionKey()
+	p.sessionLock.RLock()
+	defer p.sessionLock.RUnlock()
+	s, ok := p.sessions[key]
+	return s, ok
 }
 
-// pathIDState returns the ADD-PATH state of NLRI type nlriType in a table:
-// unknown if no Peer Up was seen for the table, and no Path IDs for an NLRI
-// type that neither OPEN message lists.
-func (p *producer) pathIDState(tableKey string, nlriType int) base.PathIDState {
-	p.tableLock.RLock()
-	defer p.tableLock.RUnlock()
-
-	props, ok := p.tableProperties[tableKey]
-	if !ok || props.pathIDState == nil {
-		return base.PathIDUnknown
+// nlriState returns the ADD-PATH and Multiple Labels Capability state of NLRI
+// type nlriType in a Route Monitoring message with header ph, both unknown if
+// no Peer Up was seen for the session.
+func (p *producer) nlriState(ph *bmp.PerPeerHeader, nlriType int) (base.PathIDState, base.MultiLabel) {
+	s, ok := p.session(ph)
+	if !ok {
+		return base.PathIDUnknown, base.MultiLabelUnknown
 	}
-	if s, ok := props.pathIDState[nlriType]; ok {
-		return s
+	ml := base.MultiLabelAbsent
+	if s.multiLabel[nlriType] {
+		ml = base.MultiLabelConfirmed
 	}
-	return base.PathIDAbsent
+	return s.pathIDs(ph, nlriType), ml
 }
 
-// GetTableName returns table name from Table Informational TLVs
-// Used for populating TableName field in LocRIB routes
-// Per RFC 9069 Section 5: TLV Type 3 contains the Table Name string
-func (p *producer) GetTableName(bgpID, rd string) string {
-	p.tableLock.RLock()
-	defer p.tableLock.RUnlock()
-
-	tableKey := bgpID + rd
+// GetTableName returns the VRF/Table Name of the Loc-RIB instance a message
+// with header ph belongs to, from its Peer Up Information TLVs (RFC 9069
+// §5.2.1), concatenated if there are several.
+func (p *producer) GetTableName(ph *bmp.PerPeerHeader) string {
+	s, _ := p.session(ph)
 	tn := ""
-
-	if properties, ok := p.tableProperties[tableKey]; ok {
-		for _, tlv := range properties.tableInfoTLVs {
-			if tlv.InformationType == 3 {
-				// Information is []byte, convert to string
-				tn += string(tlv.Information)
-			}
+	for _, tlv := range s.tableInfoTLVs {
+		if tlv.InformationType == bmp.PeerUpTLVVRFTableName {
+			tn += string(tlv.Information)
 		}
 	}
-
 	return tn
 }
 
 // NewProducer instantiates a new instance of a producer with Publisher interface
 func NewProducer(publisher pub.Publisher, splitAF bool) Producer {
 	return &producer{
-		publisher:       publisher,
-		splitAF:         splitAF,
-		tableProperties: make(map[string]PerTableProperties),
-		speakerReady:    make(chan struct{}),
-		identities:      make(map[string]bmp.PeerIdentity),
+		publisher:    publisher,
+		splitAF:      splitAF,
+		sessions:     make(map[string]sessionState),
+		speakerReady: make(chan struct{}),
+		identities:   make(map[string]bmp.PeerIdentity),
 	}
 }

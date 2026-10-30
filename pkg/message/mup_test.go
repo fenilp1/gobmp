@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/sbezverk/gobmp/pkg/base"
 	"github.com/sbezverk/gobmp/pkg/bgp"
 	"github.com/sbezverk/gobmp/pkg/bmp"
 	"github.com/sbezverk/gobmp/pkg/srv6"
@@ -273,10 +274,11 @@ func TestProducerMUPAddPath(t *testing.T) {
 		0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x64,
 		0x18, 0x0a, 0x0a, 0x0a,
 	}...)
-	nlri, err := bgp.UnmarshalMPReachNLRI(raw, false, map[int]bool{bgp.NLRIMessageType(1, 85): true})
+	nlri, err := bgp.UnmarshalMPReachNLRI(raw, false)
 	if err != nil {
 		t.Fatalf("UnmarshalMPReachNLRI() unexpected error: %+v", err)
 	}
+	nlri.(*bgp.MPReachNLRI).PathIDs = base.PathIDPresent
 
 	msgs, err := mupProducer().mup(nlri, AddPrefix, minimalPeerHeader(), mupUpdateWithPrefixSID())
 	if err != nil {

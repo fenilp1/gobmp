@@ -22,7 +22,7 @@ func TestMulticast_IPv4NLRI_IPv4NextHop(t *testing.T) {
 		0x00,                   // Reserved
 		0x18, 0xe0, 0x01, 0x01, // /24 prefix: 224.1.1.0/24
 	}
-	nlri, err := bgp.UnmarshalMPReachNLRI(reachBytes, false, map[int]bool{})
+	nlri, err := bgp.UnmarshalMPReachNLRI(reachBytes, false)
 	if err != nil {
 		t.Fatalf("UnmarshalMPReachNLRI: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestMulticast_IPv6NLRI_IPv6NextHop(t *testing.T) {
 		0x00,                                                 // Reserved
 		0x40, 0xff, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // /64 prefix: ff05::/64
 	}
-	nlri, err := bgp.UnmarshalMPReachNLRI(reachBytes, false, map[int]bool{})
+	nlri, err := bgp.UnmarshalMPReachNLRI(reachBytes, false)
 	if err != nil {
 		t.Fatalf("UnmarshalMPReachNLRI: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestMulticast_IPv4NLRI_IPv6NextHop_Mismatch(t *testing.T) {
 		0x00,                   // Reserved
 		0x18, 0xe0, 0x01, 0x01, // /24 prefix: 224.1.1.0/24
 	}
-	nlri, err := bgp.UnmarshalMPReachNLRI(reachBytes, false, map[int]bool{})
+	nlri, err := bgp.UnmarshalMPReachNLRI(reachBytes, false)
 	if err != nil {
 		t.Fatalf("UnmarshalMPReachNLRI: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestMulticast_IPv6NLRI_MappedIPv4NextHop_Mismatch(t *testing.T) {
 		0x00,                                                 // Reserved
 		0x40, 0xff, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // /64 prefix: ff05::/64
 	}
-	nlri, err := bgp.UnmarshalMPReachNLRI(reachBytes, false, map[int]bool{})
+	nlri, err := bgp.UnmarshalMPReachNLRI(reachBytes, false)
 	if err != nil {
 		t.Fatalf("UnmarshalMPReachNLRI: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestMulticast_Withdraw_NoNextHop(t *testing.T) {
 		0x02,                                                 // SAFI: 2 (multicast)
 		0x40, 0xff, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // /64 prefix: ff05::/64
 	}
-	nlri, err := bgp.UnmarshalMPUnReachNLRI(unreachBytes, map[int]bool{})
+	nlri, err := bgp.UnmarshalMPUnReachNLRI(unreachBytes)
 	if err != nil {
 		t.Fatalf("UnmarshalMPUnReachNLRI: %v", err)
 	}

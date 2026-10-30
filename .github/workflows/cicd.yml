@@ -679,7 +679,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Per-VRF Infrastructure Tests :white_check_mark:" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          go test -v ./pkg/message/... -run "TestGetTableKey|TestPerTableAddPath|TestTableLifecycle|TestGetTableName" | tee per-vrf-test-output.txt
+          go test -v ./pkg/message/... -run "TestSessionStateIsolation|TestSessionLifecycle|TestSessionPathIDs|TestTwoSessionsToOneNeighbour|TestPathIDDirection|TestGetTableName" | tee per-vrf-test-output.txt
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           grep -E "PASS|FAIL" per-vrf-test-output.txt | tail -20 >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

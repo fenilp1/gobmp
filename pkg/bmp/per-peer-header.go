@@ -278,13 +278,25 @@ func (p *PerPeerHeader) GetPeerDistinguisherString() string {
 	return pd
 }
 
-// GetTableKey returns unique table identifier combining BGP-ID and Peer Distinguisher
-// This key is used to track per-VRF properties (AddPath capability, table info)
-// Format: "<bgp-id><rd>" e.g., "10.0.0.10:0" or "192.168.1.165000:100"
-// Per RFC 9069 Section 4: Each Loc-RIB instance is uniquely identified by
-// the combination of Peer BGP ID and Peer Distinguisher fields
-func (p *PerPeerHeader) GetTableKey() string {
-	return p.GetPeerBGPIDString() + p.GetPeerDistinguisherString()
+// SessionKey returns the key of the monitored BGP session, or of the Loc-RIB
+// instance, that a message with this header belongs to. The Peer Up, Route
+// Monitoring and Peer Down messages of one session carry the same key
+// (RFC 7854 §4.2), whatever their L and O flags (RFC 8671 §6.3).
+//
+// Peer Types 0, 1 and 2 use the peer type, Peer Distinguisher and Peer
+// Address: within an instance a router has one session per neighbour address,
+// while two sessions to one neighbour, such as one over IPv4 and one over IPv6
+// transport, share its AS and BGP ID. AS and BGP ID are left out, so a session
+// re-established with a new BGP ID replaces the state of the old one.
+//
+// Peer Type 3 uses the peer type, Peer Distinguisher and Peer BGP ID, which
+// identify a Loc-RIB instance (RFC 9069 §6.1.1); its Peer Address is zero
+// (RFC 9069 §5.1).
+func (p *PerPeerHeader) SessionKey() string {
+	if p.PeerType == PeerType3 {
+		return fmt.Sprintf("%d|%x|%s", p.PeerType, p.PeerDistinguisher, p.GetPeerBGPIDString())
+	}
+	return fmt.Sprintf("%d|%x|%s", p.PeerType, p.PeerDistinguisher, p.GetPeerAddrString())
 }
 
 // PeerIdentity returns the cache key for a peer identity. Peer Types 0/1/2 use

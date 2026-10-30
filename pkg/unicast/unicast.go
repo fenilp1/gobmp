@@ -9,8 +9,10 @@ import (
 	"github.com/sbezverk/tools"
 )
 
-// UnmarshalUnicastNLRI builds MP NLRI object from the slice of bytes
-func UnmarshalUnicastNLRI(b []byte, pathID bool) (*base.MPNLRI, error) {
+// UnmarshalUnicastNLRI builds MP NLRI object from the slice of bytes of an
+// MP_REACH_NLRI or MP_UNREACH_NLRI attribute of AFI 1/2 SAFI 1, with the
+// ADD-PATH state s (see base.UnmarshalRoutes).
+func UnmarshalUnicastNLRI(b []byte, s base.PathIDState) (*base.MPNLRI, error) {
 	if glog.V(6) {
 		glog.Infof("MP Unicast NLRI Raw: %s", tools.MessageHex(b))
 	}
@@ -18,7 +20,7 @@ func UnmarshalUnicastNLRI(b []byte, pathID bool) (*base.MPNLRI, error) {
 		return &base.MPNLRI{NLRI: make([]base.Route, 0)}, nil
 	}
 	mpnlri := base.MPNLRI{}
-	r, err := base.UnmarshalRoutes(b, pathID)
+	r, err := base.UnmarshalRoutes(b, s)
 	if err != nil {
 		return nil, err
 	}
@@ -30,7 +32,7 @@ func UnmarshalUnicastNLRI(b []byte, pathID bool) (*base.MPNLRI, error) {
 // Options gives the session and attribute context that RFC 8277 labeled
 // unicast NLRI (AFI 1/2, SAFI 4) is decoded in.
 type Options struct {
-	// PathIDs is the table's ADD-PATH state: with Path IDs a 4-octet Path
+	// PathIDs is the session's ADD-PATH state: with Path IDs a 4-octet Path
 	// Identifier precedes the Length field (RFC 8277 §2.2, §2.3; RFC 7911
 	// §3). See base.DecodeWithPathID.
 	PathIDs base.PathIDState

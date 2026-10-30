@@ -69,20 +69,20 @@ func TestUnmarshalBaseNLRI(t *testing.T) {
 		name    string
 		input   []byte
 		expect  []Route
-		pathID  bool
+		pathIDs PathIDState
 		wantErr bool
 	}{
 		{
 			name:    "EoR Case",
 			input:   []byte{},
-			pathID:  false,
+			pathIDs: PathIDAbsent,
 			expect:  []Route{},
 			wantErr: false,
 		},
 		{
-			name:   "Default prefix",
-			input:  []byte{0x0},
-			pathID: false,
+			name:    "Default prefix",
+			input:   []byte{0x0},
+			pathIDs: PathIDAbsent,
 			expect: []Route{
 				{
 					Length: 0x0,
@@ -91,9 +91,9 @@ func TestUnmarshalBaseNLRI(t *testing.T) {
 			},
 		},
 		{
-			name:   "fail",
-			input:  []byte{0, 8, 10, 24, 10, 0, 0, 24, 20, 0, 0},
-			pathID: false,
+			name:    "fail",
+			input:   []byte{0, 8, 10, 24, 10, 0, 0, 24, 20, 0, 0},
+			pathIDs: PathIDAbsent,
 			expect: []Route{
 				{
 					Length: 0x0,
@@ -114,9 +114,9 @@ func TestUnmarshalBaseNLRI(t *testing.T) {
 			},
 		},
 		{
-			name:   "Panic_1",
-			input:  []byte{0x00, 0x00, 0x00, 0x01, 0x18, 0x43, 0xd3, 0x35, 0x00, 0x00, 0x00, 0x01, 0x18, 0x2d, 0xa0, 0x00},
-			pathID: true,
+			name:    "Panic_1",
+			input:   []byte{0x00, 0x00, 0x00, 0x01, 0x18, 0x43, 0xd3, 0x35, 0x00, 0x00, 0x00, 0x01, 0x18, 0x2d, 0xa0, 0x00},
+			pathIDs: PathIDPresent,
 			expect: []Route{
 				{
 					PathID: 1,
@@ -131,9 +131,9 @@ func TestUnmarshalBaseNLRI(t *testing.T) {
 			},
 		},
 		{
-			name:   "issue #227",
-			input:  []byte{0x1C, 0x02, 0x02, 0x02, 0x00},
-			pathID: false,
+			name:    "issue #227",
+			input:   []byte{0x1C, 0x02, 0x02, 0x02, 0x00},
+			pathIDs: PathIDAbsent,
 			expect: []Route{
 				{
 					PathID: 0,
@@ -145,7 +145,7 @@ func TestUnmarshalBaseNLRI(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalRoutes(tt.input, tt.pathID)
+			got, err := UnmarshalRoutes(tt.input, tt.pathIDs)
 			if err != nil && !tt.wantErr {
 				t.Fatalf("test failed with error: %+v", err)
 			}
@@ -169,28 +169,50 @@ func TestUnmarshalRoutes_RetryLimit(t *testing.T) {
 	// With pathID=true: not enough bytes for PathID (need 4).
 	// With pathID=false: prefix length 255, need 32 bytes but only 0 remain.
 	// Both fail → should return error, not hang.
-	_, err := UnmarshalRoutes([]byte{0xFF}, false)
+	_, err := UnmarshalRoutes([]byte{0xFF}, PathIDUnknown)
 	if err == nil {
 		t.Fatal("expected error for malformed input, got nil")
 	}
 }
 
-// TestUnmarshalRoutes_RetrySucceeds verifies the retry path works when flipping pathID helps.
-func TestUnmarshalRoutes_RetrySucceeds(t *testing.T) {
-	// Valid route without pathID: length=8, prefix=10.0.0.0
-	input := []byte{0x08, 0x0a}
-	// Call with pathID=true — fails (need 4 bytes for PathID), retries with pathID=false → succeeds
-	routes, err := UnmarshalRoutes(input, true)
-	if err != nil {
-		t.Fatalf("expected retry to succeed, got error: %v", err)
+// TestUnmarshalRoutes_PathIDState checks that a known ADD-PATH state parses
+// the field once, and only an unknown state retries with Path IDs (RFC 7911
+// §3, RFC 7606 §5.3).
+func TestUnmarshalRoutes_PathIDState(t *testing.T) {
+	plain := []byte{0x08, 0x0a}                          // 10.0.0.0/8
+	withID := []byte{0x00, 0x00, 0x00, 0x01, 0x08, 0x0a} // Path ID 1, 10.0.0.0/8
+	tests := []struct {
+		name    string
+		input   []byte
+		state   PathIDState
+		wantErr bool
+		pathID  uint32
+	}{
+		{name: "unknown, no Path ID", input: plain, state: PathIDUnknown},
+		{name: "unknown, Path ID, retried", input: withID, state: PathIDUnknown, pathID: 1},
+		{name: "absent, no Path ID", input: plain, state: PathIDAbsent},
+		{name: "absent, Path ID", input: withID, state: PathIDAbsent, wantErr: true},
+		{name: "present, Path ID", input: withID, state: PathIDPresent, pathID: 1},
+		{name: "present, no Path ID", input: plain, state: PathIDPresent, wantErr: true},
+		// A malformed field that reads as a /48 IPv4 route with Path ID
+		// 0x20003e81 if Path IDs are assumed.
+		{name: "absent, malformed", input: []byte{0x20, 0x00, 0x3e, 0x81, 0x30, 0x00, 0x3e, 0x81, 0x0a, 0x00, 0x00}, state: PathIDAbsent, wantErr: true},
 	}
-	if len(routes) != 1 {
-		t.Fatalf("expected 1 route, got %d", len(routes))
-	}
-	if routes[0].Length != 8 {
-		t.Errorf("expected prefix length 8, got %d", routes[0].Length)
-	}
-	if len(routes[0].Prefix) == 0 || routes[0].Prefix[0] != 0x0a {
-		t.Errorf("expected prefix starting with 10 (0x0a), got %v", routes[0].Prefix)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			routes, err := UnmarshalRoutes(tt.input, tt.state)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("UnmarshalRoutes() = %+v, want error", routes)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("UnmarshalRoutes() error: %v", err)
+			}
+			if len(routes) != 1 || routes[0].Length != 8 || routes[0].PathID != tt.pathID || !reflect.DeepEqual(routes[0].Prefix, []byte{0x0a}) {
+				t.Errorf("UnmarshalRoutes() = %+v, want one route 10.0.0.0/8 with Path ID %d", routes, tt.pathID)
+			}
+		})
 	}
 }
