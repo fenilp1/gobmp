@@ -12,6 +12,9 @@ Message updates and major project changes should be documented here.
   knowing the direction, still reads a 0x800000 or 0x000000 label field as the Compatibility field (no label)
 - `unicast.UnmarshalLUNLRIWithOptions` decodes labeled unicast NLRI per `unicast.Options`; `UnmarshalLUNLRI` wraps it and
   still reads a 0x800000 label field as the Compatibility field (no label)
+- `base.MultiLabel` (`MultiLabelUnknown`, `MultiLabelAbsent`, `MultiLabelConfirmed`), `base.LabelField` (`LabelStack`,
+  `SingleLabel`, `SRv6Label`, `CompatibilityField`), `base.ReadLabelField` and `base.DecodeLabeledNLRI` for RFC 8277 label
+  fields; `bgp.OpenMessage.MultiLabelCapability` (RFC 8277 §2.1) and `bgp.MPReachNLRI.MultiLabel`
 
 #### Changed
 
