@@ -29,8 +29,8 @@ type MPReachNLRI struct {
 	NextHopAddressLength uint8
 	NextHopAddress       []byte
 	NLRI                 []byte
-	// When BGP update carries Prefix SID attribute 40, the processing of some AFI/SAFI NLRIs
-	// may differ from the standard processing.
+	// SRv6 is set when the label fields carry SRv6 SID bits under the RFC 9252
+	// §4 Transposition Scheme; see Update.HasSRv6Transposition.
 	SRv6    bool
 	addPath map[int]bool
 }

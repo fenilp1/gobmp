@@ -4,6 +4,13 @@ Message updates and major project changes should be documented here.
 
 ## [Unreleased]
 
+### 2026-10-30
+
+#### Fixed
+
+- L3VPN labels are read as SRv6 SID bits only under the RFC 9252 §4 Transposition Scheme: Implicit NULL is now 3, not 48
+- L3VPN routes with an SR-MPLS-only Prefix-SID (RFC 8669) publish their MPLS label, e.g. 24001 instead of 384016
+
 ### 2026-03-01
 
 #### Added
