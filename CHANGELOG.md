@@ -12,7 +12,7 @@ Message updates and major project changes should be documented here.
 
 #### Fixed
 
-- Flowspec (AFI 1/2, SAFI 133) routes with a zero-length next hop (RFC 8955 §4) no longer publish `"nexthop":"invalid next hop address length: 0"`; the `nexthop` field is now omitted for any MP_REACH_NLRI with next hop length 0
+- Flowspec (AFI 1/2, SAFI 133) routes with a zero-length next hop (RFC 8955 §4) no longer publish `"nexthop":"invalid next hop address length: 0"`; the `nexthop` field is now omitted for any MP_REACH_NLRI with next hop length 0, and unicast routes without a next hop report `is_nexthop_ipv4` false
 
 ### 2026-03-01
 
