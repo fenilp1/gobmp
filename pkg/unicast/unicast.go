@@ -47,7 +47,8 @@ type Options struct {
 	// field (RFC 8277 §2.2, §2.3; RFC 7911 §3) and whether a failed parse is
 	// tried once more with the setting flipped; see base.DecodeWithPathID.
 	PathIDs base.PathIDState
-	// PathID is the setting tried first while PathIDs is unknown.
+	// PathID is the setting tried first while PathIDs is unknown; a failed
+	// parse with it set is then tried once more without.
 	PathID bool
 	// MultiLabel is the Multiple Labels Capability state; see
 	// base.DecodeLabeledNLRI.
@@ -58,15 +59,29 @@ type Options struct {
 	// AFI is the address family, 1 or 2: the prefix may be up to 32 or 128
 	// bits (RFC 8277 §2.2, §2.3). Zero allows up to 128.
 	AFI uint16
+	// compatMarker reads a label field of 0x800000 as no label, for
+	// UnmarshalLUNLRI; see isCompatMarker.
+	compatMarker bool
 }
 
-// UnmarshalLUNLRI builds MP NLRI object from the slice of bytes of an
-// announced labeled unicast NLRI field. It is UnmarshalLUNLRIWithOptions with
-// the Multiple Labels Capability state unknown and no address family, so an
-// MP_UNREACH_NLRI field, whose Compatibility field is not a label, should be
-// decoded with Options.Withdraw instead.
+// isCompatMarker reports whether the label field at the start of b is
+// 0x800000. UnmarshalLUNLRI, which is not told whether it decodes an
+// MP_REACH_NLRI or MP_UNREACH_NLRI field, reads it as the withdrawal
+// Compatibility field (RFC 8277 §2.4), as it always did. On an announcement
+// it would be a single label with S=0, which RFC 8277 §2.2 does not allow
+// ("MUST be set to one on transmission").
+func isCompatMarker(b []byte) bool {
+	return len(b) >= 3 && b[0] == 0x80 && b[1] == 0x00 && b[2] == 0x00
+}
+
+// UnmarshalLUNLRI builds MP NLRI object from the slice of bytes of a labeled
+// unicast MP_REACH_NLRI or MP_UNREACH_NLRI field. It is
+// UnmarshalLUNLRIWithOptions with the Multiple Labels Capability state
+// unknown and no address family, except that, not knowing the direction, it
+// reads a label field of 0x800000 as the Compatibility field (RFC 8277
+// §2.4), as before.
 func UnmarshalLUNLRI(b []byte, pathID bool) (*base.MPNLRI, error) {
-	return UnmarshalLUNLRIWithOptions(b, Options{PathID: pathID})
+	return UnmarshalLUNLRIWithOptions(b, Options{PathID: pathID, compatMarker: true})
 }
 
 // UnmarshalLUNLRIWithOptions builds MP NLRI object from the slice of bytes of
@@ -80,17 +95,36 @@ func UnmarshalLUNLRIWithOptions(b []byte, opts Options) (*base.MPNLRI, error) {
 	if len(b) == 0 {
 		return &base.MPNLRI{NLRI: make([]base.Route, 0)}, nil
 	}
-	mp, err := base.DecodeWithPathID(opts.PathIDs, opts.PathID, func(pathID bool) (*base.MPNLRI, error) {
-		o := opts
-		o.PathID = pathID
-		return parseLabelField(b, o)
-	})
+	mp, err := decodeLUPathIDs(b, opts)
 	if err == nil {
 		return mp, nil
 	}
 	glog.Errorf("failed to reconstruct labeled unicast prefix from slice %s with error: %+v",
 		tools.MessageHex(b), err)
 	return nil, err
+}
+
+// decodeLUPathIDs parses b with the Path ID setting of opts.PathIDs (see
+// base.DecodeWithPathID). While it is unknown, as before, a field that fails
+// with Path IDs is retried without them, but not the other way round: many
+// malformed fields read as a route once their first four octets are taken
+// as a Path ID.
+func decodeLUPathIDs(b []byte, opts Options) (*base.MPNLRI, error) {
+	if opts.PathIDs != base.PathIDUnknown {
+		return base.DecodeWithPathID(opts.PathIDs, opts.PathID, func(pathID bool) (*base.MPNLRI, error) {
+			o := opts
+			o.PathID = pathID
+			return parseLabelField(b, o)
+		})
+	}
+	mp, err := parseLabelField(b, opts)
+	if err != nil && opts.PathID {
+		opts.PathID = false
+		if mp, ferr := parseLabelField(b, opts); ferr == nil {
+			return mp, nil
+		}
+	}
+	return mp, err
 }
 
 // parseLabelField picks the label field reading: the Compatibility field for
@@ -134,6 +168,9 @@ func parseLUNLRI(b []byte, opts Options, f base.LabelField) (*base.MPNLRI, error
 		p++
 
 		labels, n, err := base.ReadLabelField(b[p:], f)
+		if opts.compatMarker && f != base.CompatibilityField && isCompatMarker(b[p:]) {
+			labels, n, err = nil, 3, nil
+		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse label field at pos %d: %w", p, err)
 		}

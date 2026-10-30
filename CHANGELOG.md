@@ -15,8 +15,13 @@ Message updates and major project changes should be documented here.
   `nt-transport-target=`, and BGP CT routes publish their Transport Class IDs as `transport_class_ids`
 - RTC (SAFI 132) NLRI whose Route Target is a Transport Class RT (type 0x0a or 0x4a, RFC 9832 §4.3) are accepted, not
   rejected, and publish it as `transport-target:<reserved>:<id>` or `nt-transport-target:<reserved>:<id>`
-- `l3vpn.UnmarshalL3VPNNLRIWithOptions` decodes VPN NLRI per `l3vpn.Options`; `UnmarshalL3VPNNLRI` now wraps it
-- `unicast.UnmarshalLUNLRIWithOptions` decodes labeled unicast NLRI per `unicast.Options`; `UnmarshalLUNLRI` now wraps it
+- `l3vpn.UnmarshalL3VPNNLRIWithOptions` decodes VPN NLRI per `l3vpn.Options`; `UnmarshalL3VPNNLRI` wraps it and, not
+  knowing the direction, still reads a 0x800000 or 0x000000 label field as the Compatibility field (no label)
+- `unicast.UnmarshalLUNLRIWithOptions` decodes labeled unicast NLRI per `unicast.Options`; `UnmarshalLUNLRI` wraps it and
+  still reads a 0x800000 label field as the Compatibility field (no label)
+- `base.MultiLabel` (`MultiLabelUnknown`, `MultiLabelAbsent`, `MultiLabelConfirmed`), `base.LabelField` (`LabelStack`,
+  `SingleLabel`, `SRv6Label`, `CompatibilityField`), `base.ReadLabelField` and `base.DecodeLabeledNLRI` for RFC 8277 label
+  fields; `bgp.OpenMessage.MultiLabelCapability` (RFC 8277 §2.1) and `bgp.MPReachNLRI.MultiLabel`
 - `base.PathIDState` and state-based decoders `bgp.UnmarshalMPReachNLRIWithState`, `bgp.UnmarshalMPUnReachNLRIWithState`,
   `base.UnmarshalRoutesWithState`, `unicast.UnmarshalUnicastNLRIWithState` and `multicast.UnmarshalMulticastNLRIWithState`;
   the ADD-PATH map and bool forms are kept, and the routes decoders also take the address family
@@ -31,13 +36,17 @@ Message updates and major project changes should be documented here.
 - Labeled unicast (SAFI 4) announcements with label 0x800000 publish label 524288 (RFC 8277 §2.2), not none: new hashes
 - Labeled unicast withdrawals skip the Compatibility field whatever its value and publish no labels (RFC 8277 §2.4)
 - Labeled unicast IPv4 prefixes over 32 bits are dropped as malformed (RFC 8277 §2.2)
-- Labeled unicast retries a failed parse with the Path ID flag flipped either way, as L3VPN does
 - ADD-PATH and Multiple Labels state is kept per monitored session, so sessions sharing a BGP ID, or an IPv4 and an
   IPv4-mapped IPv6 peer, stay apart and a Peer Down removes only its own
 - Path IDs are expected per direction (RFC 7911 §5): Adj-RIB-In on peer Send and router Receive, Adj-RIB-Out the reverse,
   Loc-RIB whenever the capability is present; a failed parse is still retried with the setting flipped
 - SAFI 1/2 and the NLRI and Withdrawn Routes fields drop prefixes over 32 bits (IPv4) or 128 (IPv6) as malformed
   (RFC 4271 §4.3, RFC 7606 §5.3) instead of capping IPv4 lengths at 32
+- The retry of a negotiated Path ID setting keeps its result only if plausible, no Path ID over 0x00ffffff and no
+  Length 0 route among others (RFC 7911 §2 gives Path IDs no semantics), so it drops malformed fields such as
+  20003e81 30003e81 0a0000 rather than publishing a bogus route. With no Peer Up the retry is unguarded, as before:
+  labeled unicast only retries a field that fails with Path IDs without them, while SAFI 1/2, the NLRI fields and L3VPN
+  retry either way and may still publish such a route
 - NLRI decode errors are logged with router, peer, RIB view and AFI/SAFI, and NLRI read with the Path ID setting
   opposite to the negotiated one log a warning, at most once a minute per session and AFI/SAFI
 
