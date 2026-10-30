@@ -19,14 +19,7 @@ func UnmarshalUnicastNLRI(b []byte, s base.PathIDState, ipv6 bool) (*base.MPNLRI
 	if len(b) == 0 {
 		return &base.MPNLRI{NLRI: make([]base.Route, 0)}, nil
 	}
-	mpnlri := base.MPNLRI{}
-	r, err := base.UnmarshalRoutes(b, s, ipv6)
-	if err != nil {
-		return nil, err
-	}
-	mpnlri.NLRI = r
-
-	return &mpnlri, nil
+	return base.UnmarshalRoutes(b, s, ipv6)
 }
 
 // Options gives the session and attribute context that RFC 8277 labeled

@@ -60,6 +60,10 @@ type PerPeerHeader struct {
 	// Identity is attached by the message producer and is not part of the BMP
 	// Per-Peer Header wire format.
 	Identity PeerIdentity
+	// Session is attached by the message producer, which alone reads it: its
+	// view of the session's Peer Up state when it dispatched the message. It
+	// is not part of the wire format.
+	Session any
 }
 
 // Len returns the length of PerPeerHeader structure
@@ -283,8 +287,9 @@ func (p *PerPeerHeader) GetPeerDistinguisherString() string {
 // Monitoring and Peer Down messages of one session carry the same key
 // (RFC 7854 §4.2), whatever their L and O flags (RFC 8671 §6.3).
 //
-// Peer Types 0, 1 and 2 use the peer type, Peer Distinguisher and Peer
-// Address: within an instance a router has one session per neighbour address,
+// Peer Types 0, 1 and 2 use the peer type, Peer Distinguisher, V flag and
+// Peer Address, so an IPv4 peer and an IPv4-mapped IPv6 one differ: within an
+// instance a router has one session per neighbour address,
 // while two sessions to one neighbour, such as one over IPv4 and one over IPv6
 // transport, share its AS and BGP ID. AS and BGP ID are left out, so a session
 // re-established with a new BGP ID replaces the state of the old one.
@@ -296,7 +301,7 @@ func (p *PerPeerHeader) SessionKey() string {
 	if p.PeerType == PeerType3 {
 		return fmt.Sprintf("%d|%x|%s", p.PeerType, p.PeerDistinguisher, p.GetPeerBGPIDString())
 	}
-	return fmt.Sprintf("%d|%x|%s", p.PeerType, p.PeerDistinguisher, p.GetPeerAddrString())
+	return fmt.Sprintf("%d|%x|%t|%s", p.PeerType, p.PeerDistinguisher, p.flagV, p.GetPeerAddrString())
 }
 
 // PeerIdentity returns the cache key for a peer identity. Peer Types 0/1/2 use

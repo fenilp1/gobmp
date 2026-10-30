@@ -43,10 +43,10 @@ type MPReachNLRI struct {
 	PathIDs base.PathIDState
 }
 
-// hasPathIDs reports whether the NLRI are known to carry Path Identifiers,
-// for the decoders that take the ADD-PATH setting as a bool.
+// hasPathIDs reports whether the NLRI are expected to carry Path
+// Identifiers, for the decoders that take the ADD-PATH setting as a bool.
 func (mp *MPReachNLRI) hasPathIDs() bool {
-	return mp.PathIDs == base.PathIDPresent
+	return mp.PathIDs.Expected()
 }
 
 // GetAFISAFIType returns underlaying NLRI's type based on AFI/SAFI

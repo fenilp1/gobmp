@@ -31,10 +31,11 @@ func (pd *PrefixDescriptor) GetPrefixMTID() *MultiTopologyIdentifier {
 func (pd *PrefixDescriptor) GetPrefixIPReachability(ipv4 bool) *Route {
 	if tlv, ok := pd.PrefixTLV[265]; ok {
 		// The IP Reachability Information TLV carries no Path ID
-		routes, err := UnmarshalRoutes(tlv.Value, PathIDAbsent, !ipv4)
+		mp, err := UnmarshalRoutes(tlv.Value, PathIDAbsent, !ipv4)
 		if err != nil {
 			return nil
 		}
+		routes := mp.NLRI
 		// Prefix descriptor should carry only a single route, if more than 1 something is wrong
 		// returning nil for that case.
 		if len(routes) != 1 {

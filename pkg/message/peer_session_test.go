@@ -2,6 +2,7 @@ package message
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -148,11 +149,12 @@ func TestTwoSessionsToOneNeighbour(t *testing.T) {
 // (RFC 7911 §5). The Peer Up sent OPEN is the monitored router's and the
 // received OPEN the peer's (RFC 7854 §4.10); Adj-RIB-In holds routes from the
 // peer and Adj-RIB-Out (O flag) routes to it (RFC 8671 §4). A Loc-RIB uses
-// Path IDs whenever the capability is present (RFC 9069 §5.2). The state is
-// known in every case, so NLRI are parsed once, without the Path ID flip.
+// Path IDs whenever the capability is present (RFC 9069 §5.2). These views
+// fix the encoding (pre-policy Adj-RIB-In, post-policy Adj-RIB-Out, RFC 8671
+// §5.1), so NLRI are parsed once, without the Path ID flip.
 func TestPathIDDirection(t *testing.T) {
 	adjIn := globalHeader("192.0.2.1", "10.0.0.1")
-	adjOut := globalHeaderFlags("192.0.2.1", "10.0.0.1", 0x10) // O flag
+	adjOut := globalHeaderFlags("192.0.2.1", "10.0.0.1", 0x50) // O and L flags
 	locRIB := makePeerHeader(t, bmp.PeerType3, 0x00)
 	if adjIn.SessionKey() != adjOut.SessionKey() {
 		t.Fatalf("Adj-RIB-In and Adj-RIB-Out session keys %q and %q differ", adjIn.SessionKey(), adjOut.SessionKey())
@@ -257,19 +259,143 @@ func TestMalformedNLRIWithKnownPathIDState(t *testing.T) {
 
 // TestLocRIBEmulatedPeers checks that a Loc-RIB conveyed by one emulated
 // peer per address family, which share the per-peer header (RFC 9069
-// §6.1.1), keeps the ADD-PATH state of each Peer Up.
+// §6.1.1), keeps the ADD-PATH state of each Peer Up and the Information TLVs
+// of all as an ordered set (RFC 9069 §5.2.1). A Peer Down cannot tell which
+// emulated peer it ends, so the state lasts until the last one's.
 func TestLocRIBEmulatedPeers(t *testing.T) {
 	s := newSessionTest(t)
 	ph := makePeerHeader(t, bmp.PeerType3, 0x00)
-	s.peerUp(ph, addPathTestCaps(1, [2]byte{1, 1}), addPathTestCaps(1, [2]byte{1, 1}))
-	s.peerUp(ph, addPathTestCaps(1, [2]byte{2, 1}), addPathTestCaps(1, [2]byte{2, 1}))
+	peerUp := func(afi byte, names ...string) {
+		t.Helper()
+		peerUp := buildPeerUpMessage(t, "192.168.1.1")
+		peerUp.SentOpen.Capabilities = addPathTestCaps(1, [2]byte{afi, 1})
+		peerUp.ReceivedOpen.Capabilities = addPathTestCaps(1, [2]byte{afi, 1})
+		for _, n := range names {
+			peerUp.Information = append(peerUp.Information, bmp.InformationalTLV{InformationType: bmp.PeerUpTLVVRFTableName, Information: []byte(n)})
+		}
+		s.p.producingWorker(bmp.Message{PeerHeader: ph, Payload: peerUp, SpeakerIP: "10.2.1.3"})
+	}
+	peerUp(1, "global", "view-A")
+	peerUp(2, "global", "view-B")
 	for _, nlriType := range []int{bgp.NLRIMessageType(1, 1), bgp.NLRIMessageType(2, 1)} {
 		if ids, _ := s.p.nlriState(ph, nlriType); ids != base.PathIDPresent {
 			t.Errorf("NLRI type %d: state %d, want present", nlriType, ids)
 		}
 	}
+	if tn := s.p.GetTableName(ph); tn != "globalview-Aview-B" {
+		t.Errorf("GetTableName() = %q, want the ordered set globalview-Aview-B", tn)
+	}
+
+	// IPv4 routes with Path IDs; read without them they would be five
+	// bogus routes.
+	v4PathID := catBytes([]byte{0, 0, 0, 7}, sessionV4)
+	s.peerDown(ph)
+	wantRoute(t, "IPv4 after one Peer Down", s.routes(ph, ctTestUpdate(t, mpTestAttr(0x0e, 1, 1, sessionV4NH, v4PathID))), "10.1.2.0", 24, 7, nil)
+	if tn := s.p.GetTableName(ph); tn != "globalview-Aview-B" {
+		t.Errorf("GetTableName() after one Peer Down = %q, want globalview-Aview-B", tn)
+	}
 	s.peerDown(ph)
 	if ids, _ := s.p.nlriState(ph, bgp.NLRIMessageType(1, 1)); ids != base.PathIDUnknown {
-		t.Errorf("after Peer Down: state %d, want unknown", ids)
+		t.Errorf("after the last Peer Down: state %d, want unknown", ids)
+	}
+}
+
+// TestPathIDExpectedViews checks post-policy Adj-RIB-In and pre-policy
+// Adj-RIB-Out, whose ADD-PATH encoding no RFC fixes: NLRI are decoded with
+// the setting the capabilities suggest and, if that fails, with the other.
+func TestPathIDExpectedViews(t *testing.T) {
+	withID := catBytes(sessionPathID, sessionV4)
+	tests := []struct {
+		name       string
+		flags      byte
+		sent, recv byte
+		nlri       []byte
+		pathID     int32
+	}{
+		// The reviewer's repro: ADD-PATH both ways, post-policy Adj-RIB-In,
+		// NLRI without Path IDs.
+		{name: "Adj-RIB-In post-policy, expected Path IDs absent", flags: 0x40, sent: 3, recv: 3, nlri: sessionV4},
+		{name: "Adj-RIB-In post-policy, expected Path IDs present", flags: 0x40, sent: 3, recv: 3, nlri: withID, pathID: 0xff},
+		{name: "Adj-RIB-In post-policy, unexpected Path IDs", flags: 0x40, nlri: withID, pathID: 0xff},
+		{name: "Adj-RIB-Out pre-policy, expected Path IDs absent", flags: 0x10, sent: 2, recv: 1, nlri: sessionV4},
+		{name: "Adj-RIB-Out pre-policy, unexpected Path IDs", flags: 0x10, sent: 1, recv: 2, nlri: withID, pathID: 0xff},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newSessionTest(t)
+			ph := globalHeaderFlags("192.0.2.1", "10.0.0.1", tt.flags)
+			var sentAS, recvAS [][2]byte
+			if tt.sent != 0 {
+				sentAS = [][2]byte{{1, 1}}
+			}
+			if tt.recv != 0 {
+				recvAS = [][2]byte{{1, 1}}
+			}
+			s.peerUp(ph, addPathTestCaps(tt.sent, sentAS...), addPathTestCaps(tt.recv, recvAS...))
+			wantRoute(t, "MP_REACH_NLRI", s.routes(ph, ctTestUpdate(t, mpTestAttr(0x0e, 1, 1, sessionV4NH, tt.nlri))), "10.1.2.0", 24, tt.pathID, nil)
+			wantRoute(t, "NLRI field", s.routes(ph, plainTestUpdate(t, nil, tt.nlri)), "10.1.2.0", 24, tt.pathID, nil)
+		})
+	}
+	// The flip is rate limited per session and AFI/SAFI.
+	s := newSessionTest(t)
+	ph := globalHeaderFlags("192.0.2.1", "10.0.0.1", 0x40)
+	s.peerUp(ph, addPathTestCaps(3, [2]byte{1, 1}), addPathTestCaps(3, [2]byte{1, 1}))
+	for i := 0; i < 3; i++ {
+		s.routes(ph, ctTestUpdate(t, mpTestAttr(0x0e, 1, 1, sessionV4NH, sessionV4)))
+	}
+	if len(s.p.pathIDWarned) != 1 {
+		t.Errorf("warnings recorded for %d session AFI/SAFIs, want 1", len(s.p.pathIDWarned))
+	}
+	s.peerDown(ph)
+	if len(s.p.pathIDWarned) != 0 {
+		t.Errorf("warnings recorded after Peer Down for %d session AFI/SAFIs, want 0", len(s.p.pathIDWarned))
+	}
+}
+
+// TestRouteMonitorSessionSnapshot checks that a Route Monitoring message is
+// decoded with the session state at its place in the stream, not that of a
+// Peer Down and Peer Up the dispatcher handled before its worker ran.
+func TestRouteMonitorSessionSnapshot(t *testing.T) {
+	s := newSessionTest(t)
+	ph := globalHeader("192.0.2.1", "10.0.0.1")
+	s.peerUp(ph, addPathTestCaps(3, [2]byte{1, 1}), addPathTestCaps(3, [2]byte{1, 1}))
+	msg := bmp.Message{PeerHeader: ph, Payload: &bmp.RouteMonitor{Update: ctTestUpdate(t, mpTestAttr(0x0e, 1, 1, sessionV4NH, catBytes([]byte{0, 0, 0, 7}, sessionV4)))}}
+	// As the Producer dispatch loop does before starting the worker.
+	s.p.attachIdentitySnapshot(&msg)
+	s.p.attachSessionSnapshot(&msg)
+	s.peerDown(ph)
+	s.peerUp(ph, bgp.Capability{}, bgp.Capability{})
+
+	n := len(s.pub.msgs)
+	s.p.producingWorker(msg)
+	var got []UnicastPrefix
+	for _, m := range s.pub.msgs[n:] {
+		var u UnicastPrefix
+		if err := json.Unmarshal(m.payload, &u); err != nil {
+			t.Fatalf("json.Unmarshal() error: %v", err)
+		}
+		got = append(got, u)
+	}
+	wantRoute(t, "Route Monitoring dispatched before the Peer Down", got, "10.1.2.0", 24, 7, nil)
+	if ph.Session != nil {
+		t.Error("the snapshot was attached to the shared per-peer header")
+	}
+}
+
+// TestDecodeErrorContext checks that a dropped NLRI field is logged with its
+// session: router, peer, RIB view and AFI/SAFI.
+func TestDecodeErrorContext(t *testing.T) {
+	p := NewProducer(&mockPublisher{}, false).(*producer)
+	ph := globalHeaderFlags("192.0.2.1", "10.0.0.1", 0x50)
+	err := p.checkDecoded(ph, 1, 1, nil, errors.New("not enough bytes"))
+	want := "router 10.0.0.1 peer 192.0.2.1 distinguisher 0:0 Adj-RIB-Out post-policy AFI/SAFI 1/1: not enough bytes"
+	if err == nil || err.Error() != want {
+		t.Errorf("checkDecoded() = %v, want %s", err, want)
+	}
+	ph = makePeerHeader(t, bmp.PeerType3, 0x00)
+	err = p.checkDecoded(ph, 2, 1, nil, errors.New("x"))
+	want = "router 10.0.0.1 peer BGP ID 10.0.0.1 distinguisher 0:0 Loc-RIB AFI/SAFI 2/1: x"
+	if err == nil || err.Error() != want {
+		t.Errorf("checkDecoded() = %v, want %s", err, want)
 	}
 }

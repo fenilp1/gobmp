@@ -1,9 +1,13 @@
 package message
 
 import (
+	"bytes"
 	"crypto/md5"
 	"encoding/hex"
+	"fmt"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/golang/glog"
 	"github.com/sbezverk/gobmp/pkg/base"
@@ -31,6 +35,17 @@ type sessionState struct {
 	// tableInfoTLVs holds the Peer Up Information TLVs, which include the
 	// VRF/Table Name (RFC 9069 §5.2.1).
 	tableInfoTLVs []bmp.InformationalTLV
+	// peerUps counts the Peer Ups of a Loc-RIB's emulated peers that no
+	// Peer Down has ended yet (RFC 9069 §6.1.1).
+	peerUps int
+}
+
+// sessionSnapshot is the state of a session as the producer dispatched a
+// message of it, attached to the message's per-peer header, so a message
+// decoded later is not decoded with the state of a later Peer Up or Down.
+type sessionSnapshot struct {
+	s  sessionState
+	ok bool
 }
 
 // ADD-PATH Send/Receive bits (RFC 7911 §4).
@@ -59,7 +74,8 @@ func newSessionState(peerUp *bmp.PeerUpMessage) sessionState {
 
 // mergeLocRIB returns the state of a Loc-RIB instance conveyed by more than
 // one emulated peer, each with its own Peer Up for some address families
-// (RFC 9069 §6.1.1): the capabilities of both, and the TLVs of the newer.
+// (RFC 9069 §6.1.1): the capabilities of both, and their Information TLVs
+// as an ordered set (RFC 9069 §5.2.1).
 func mergeLocRIB(old, s sessionState) sessionState {
 	union := func(a, b map[int]uint8) map[int]uint8 {
 		m := make(map[int]uint8, len(a)+len(b))
@@ -80,6 +96,21 @@ func mergeLocRIB(old, s sessionState) sessionState {
 		}
 	}
 	s.multiLabel = multiLabel
+	tlvs := append([]bmp.InformationalTLV(nil), old.tableInfoTLVs...)
+	for _, tlv := range s.tableInfoTLVs {
+		dup := false
+		for _, o := range tlvs {
+			if o.InformationType == tlv.InformationType && bytes.Equal(o.Information, tlv.Information) {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			tlvs = append(tlvs, tlv)
+		}
+	}
+	s.tableInfoTLVs = tlvs
+	s.peerUps = old.peerUps + s.peerUps
 	return s
 }
 
@@ -89,6 +120,11 @@ func mergeLocRIB(old, s sessionState) sessionState {
 // 7911 §5): an Adj-RIB-In holds routes from the peer to the monitored router,
 // an Adj-RIB-Out (O flag, RFC 8671 §4) routes from the router to the peer.
 // For a Loc-RIB the capability's presence is enough (RFC 9069 §5.2).
+//
+// The encoding is fixed for pre-policy Adj-RIB-In, as received (RFC 7854
+// §2, RFC 7911 §5), post-policy Adj-RIB-Out, as sent (RFC 8671 §5.1), and
+// Loc-RIB (RFC 9069 §5.2). No RFC fixes it for post-policy Adj-RIB-In or
+// pre-policy Adj-RIB-Out, which therefore get an expected state only.
 func (s sessionState) pathIDs(ph *bmp.PerPeerHeader, nlriType int) base.PathIDState {
 	router, peer := s.addPathSent[nlriType], s.addPathRecv[nlriType]
 	var present bool
@@ -98,6 +134,14 @@ func (s sessionState) pathIDs(ph *bmp.PerPeerHeader, nlriType int) base.PathIDSt
 		present = router&addPathSend != 0 && peer&addPathReceive != 0
 	} else {
 		present = peer&addPathSend != 0 && router&addPathReceive != 0
+	}
+	post, _ := ph.IsPostPolicy()
+	out, _ := ph.IsAdjRIBOut()
+	if ph.PeerType != bmp.PeerType3 && post != out {
+		if present {
+			return base.PathIDExpectPresent
+		}
+		return base.PathIDExpectAbsent
 	}
 	if present {
 		return base.PathIDPresent
@@ -135,6 +179,10 @@ type producer struct {
 	// bmp.PerPeerHeader.SessionKey, from its Peer Up to its Peer Down.
 	sessionLock sync.RWMutex
 	sessions    map[string]sessionState
+	// pathIDWarned holds when a Path ID flip was last logged per session
+	// and AFI/SAFI, to rate limit the warning.
+	pathIDWarnLock sync.Mutex
+	pathIDWarned   map[string]time.Time
 	// If splitAF is set to true, ipv4 and ipv6 messages will go into separate topics
 	splitAF bool
 	// collectorAdminID is the collector identifier string for OpenBMP binary header
@@ -159,8 +207,10 @@ func (p *producer) Producer(queue chan bmp.Message, stop chan struct{}) {
 				// State changes update identity cache and publish in input order.
 				p.producingWorker(msg)
 			default:
-				// Other message types carry an identity snapshot and can fan out.
+				// Other message types carry an identity and session state
+				// snapshot and can fan out.
 				p.attachIdentitySnapshot(&msg)
+				p.attachSessionSnapshot(&msg)
 				go p.producingWorker(msg)
 			}
 		case <-stop:
@@ -168,6 +218,16 @@ func (p *producer) Producer(queue chan bmp.Message, stop chan struct{}) {
 			return
 		}
 	}
+}
+
+// attachSessionSnapshot attaches the current state of the message's session
+// to its per-peer header, which attachIdentitySnapshot has made a copy of.
+func (p *producer) attachSessionSnapshot(msg *bmp.Message) {
+	if msg == nil || msg.PeerHeader == nil {
+		return
+	}
+	s, ok := p.session(msg.PeerHeader)
+	msg.PeerHeader.Session = &sessionSnapshot{s: s, ok: ok}
 }
 
 func (p *producer) attachIdentitySnapshot(msg *bmp.Message) {
@@ -327,6 +387,7 @@ func (p *producer) SetConfig(config *Config) error {
 // adding to it (RFC 9069 §6.1.1).
 func (p *producer) storeSession(ph *bmp.PerPeerHeader, s sessionState) {
 	key := ph.SessionKey()
+	s.peerUps = 1
 	p.sessionLock.Lock()
 	defer p.sessionLock.Unlock()
 	if old, ok := p.sessions[key]; ok && ph.PeerType == bmp.PeerType3 {
@@ -336,18 +397,42 @@ func (p *producer) storeSession(ph *bmp.PerPeerHeader, s sessionState) {
 }
 
 // deleteSession removes the state of the session that the Peer Down with
-// header ph ends; for a Loc-RIB, that of all its emulated peers, which share
-// the header.
+// header ph ends. The emulated peers of a Loc-RIB share the header, and a
+// Peer Down carries no OPEN to tell which one it ends (RFC 9069 §5.3,
+// §6.1.1), so a Loc-RIB's state is kept, capabilities of all, until the Peer
+// Down of the last one.
 func (p *producer) deleteSession(ph *bmp.PerPeerHeader) {
 	key := ph.SessionKey()
-	p.sessionLock.Lock()
-	defer p.sessionLock.Unlock()
-	delete(p.sessions, key)
+	deleted := func() bool {
+		p.sessionLock.Lock()
+		defer p.sessionLock.Unlock()
+		if s, ok := p.sessions[key]; ok && s.peerUps > 1 {
+			s.peerUps--
+			p.sessions[key] = s
+			return false
+		}
+		delete(p.sessions, key)
+		return true
+	}()
+	if !deleted {
+		return
+	}
+	p.pathIDWarnLock.Lock()
+	defer p.pathIDWarnLock.Unlock()
+	for k := range p.pathIDWarned {
+		if strings.HasPrefix(k, key+"/") {
+			delete(p.pathIDWarned, k)
+		}
+	}
 }
 
 // session returns the state of the session a message with header ph belongs
-// to, and false if no Peer Up was seen for it.
+// to, and false if no Peer Up was seen for it: the snapshot attached when the
+// message was dispatched, if any, else the current state.
 func (p *producer) session(ph *bmp.PerPeerHeader) (sessionState, bool) {
+	if snap, ok := ph.Session.(*sessionSnapshot); ok {
+		return snap.s, snap.ok
+	}
 	key := ph.SessionKey()
 	p.sessionLock.RLock()
 	defer p.sessionLock.RUnlock()
@@ -368,6 +453,62 @@ func (p *producer) nlriState(ph *bmp.PerPeerHeader, nlriType int) (base.PathIDSt
 		ml = base.MultiLabelConfirmed
 	}
 	return s.pathIDs(ph, nlriType), ml
+}
+
+// pathIDWarnInterval is the least time between two warnings about Path ID
+// flips for one session and AFI/SAFI.
+const pathIDWarnInterval = time.Minute
+
+// nlriContext describes where NLRI of AFI afi SAFI safi in a message with
+// header ph come from, for logs.
+func nlriContext(ph *bmp.PerPeerHeader, afi uint16, safi uint8) string {
+	view := "Loc-RIB"
+	peer := "BGP ID " + ph.GetPeerBGPIDString()
+	if ph.PeerType != bmp.PeerType3 {
+		view = "Adj-RIB-In"
+		if out, _ := ph.IsAdjRIBOut(); out {
+			view = "Adj-RIB-Out"
+		}
+		if post, _ := ph.IsPostPolicy(); post {
+			view += " post-policy"
+		} else {
+			view += " pre-policy"
+		}
+		peer = ph.GetPeerAddrString()
+	}
+	return fmt.Sprintf("router %s peer %s distinguisher %s %s AFI/SAFI %d/%d",
+		ph.Identity.RouterIP, peer, ph.GetPeerDistinguisherString(), view, afi, safi)
+}
+
+// checkDecoded adds the session context to err, the error of decoding NLRI
+// of AFI afi SAFI safi in a message with header ph, and warns, rate limited,
+// when mp was read with the Path ID setting opposite to the expected one.
+func (p *producer) checkDecoded(ph *bmp.PerPeerHeader, afi uint16, safi uint8, mp *base.MPNLRI, err error) error {
+	if err != nil {
+		return fmt.Errorf("%s: %w", nlriContext(ph, afi, safi), err)
+	}
+	if mp == nil || !mp.PathIDsFlipped {
+		return nil
+	}
+	key := fmt.Sprintf("%s/%d/%d", ph.SessionKey(), afi, safi)
+	now := time.Now()
+	warn := func() bool {
+		p.pathIDWarnLock.Lock()
+		defer p.pathIDWarnLock.Unlock()
+		if last, ok := p.pathIDWarned[key]; ok && now.Sub(last) < pathIDWarnInterval {
+			return false
+		}
+		if p.pathIDWarned == nil {
+			p.pathIDWarned = make(map[string]time.Time)
+		}
+		p.pathIDWarned[key] = now
+		return true
+	}()
+	if warn {
+		glog.Warningf("%s: NLRI decoded with the ADD-PATH Path ID setting opposite to the negotiated one; further warnings for this session and AFI/SAFI suppressed for %s",
+			nlriContext(ph, afi, safi), pathIDWarnInterval)
+	}
+	return nil
 }
 
 // GetTableName returns the VRF/Table Name of the Loc-RIB instance a message

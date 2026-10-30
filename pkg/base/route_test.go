@@ -145,7 +145,7 @@ func TestUnmarshalBaseNLRI(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalRoutes(tt.input, tt.pathIDs, false)
+			mp, err := UnmarshalRoutes(tt.input, tt.pathIDs, false)
 			if err != nil && !tt.wantErr {
 				t.Fatalf("test failed with error: %+v", err)
 			}
@@ -155,8 +155,8 @@ func TestUnmarshalBaseNLRI(t *testing.T) {
 			if err != nil {
 				return
 			}
-			if !reflect.DeepEqual(tt.expect, got) {
-				t.Fatalf("test failed as expected nlri %+v does not match actual nlri %+v", tt.expect, got)
+			if got := mp.NLRI; !reflect.DeepEqual(tt.expect, got) {
+				t.Fatalf("test failed as expected nlri %+v does not match actual nlri %+v", tt.expect, mp.NLRI)
 			}
 		})
 	}
@@ -187,6 +187,7 @@ func TestUnmarshalRoutes_PathIDState(t *testing.T) {
 		state   PathIDState
 		wantErr bool
 		pathID  uint32
+		flipped bool
 	}{
 		{name: "unknown, no Path ID", input: plain, state: PathIDUnknown},
 		{name: "unknown, Path ID, retried", input: withID, state: PathIDUnknown, pathID: 1},
@@ -194,6 +195,12 @@ func TestUnmarshalRoutes_PathIDState(t *testing.T) {
 		{name: "absent, Path ID", input: withID, state: PathIDAbsent, wantErr: true},
 		{name: "present, Path ID", input: withID, state: PathIDPresent, pathID: 1},
 		{name: "present, no Path ID", input: plain, state: PathIDPresent, wantErr: true},
+		// No RFC fixes the encoding: the expected setting first, then the
+		// other, flagged.
+		{name: "expect present, Path ID", input: withID, state: PathIDExpectPresent, pathID: 1},
+		{name: "expect present, no Path ID", input: plain, state: PathIDExpectPresent, flipped: true},
+		{name: "expect absent, no Path ID", input: plain, state: PathIDExpectAbsent},
+		{name: "expect absent, Path ID", input: withID, state: PathIDExpectAbsent, pathID: 1, flipped: true},
 		// A malformed field that reads as a /48 IPv4 route with Path ID
 		// 0x20003e81 if Path IDs are assumed: rejected either way, as a
 		// prefix over 32 bits is malformed (RFC 7606 §5.3).
@@ -202,15 +209,19 @@ func TestUnmarshalRoutes_PathIDState(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			routes, err := UnmarshalRoutes(tt.input, tt.state, false)
+			mp, err := UnmarshalRoutes(tt.input, tt.state, false)
 			if tt.wantErr {
 				if err == nil {
-					t.Fatalf("UnmarshalRoutes() = %+v, want error", routes)
+					t.Fatalf("UnmarshalRoutes() = %+v, want error", mp)
 				}
 				return
 			}
 			if err != nil {
 				t.Fatalf("UnmarshalRoutes() error: %v", err)
+			}
+			routes := mp.NLRI
+			if mp.PathIDsFlipped != tt.flipped {
+				t.Errorf("PathIDsFlipped = %t, want %t", mp.PathIDsFlipped, tt.flipped)
 			}
 			if len(routes) != 1 || routes[0].Length != 8 || routes[0].PathID != tt.pathID || !reflect.DeepEqual(routes[0].Prefix, []byte{0x0a}) {
 				t.Errorf("UnmarshalRoutes() = %+v, want one route 10.0.0.0/8 with Path ID %d", routes, tt.pathID)
@@ -240,16 +251,17 @@ func TestUnmarshalRoutes_PrefixLength(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			routes, err := UnmarshalRoutes(tt.input, tt.state, tt.ipv6)
+			mp, err := UnmarshalRoutes(tt.input, tt.state, tt.ipv6)
 			if tt.wantErr {
 				if err == nil {
-					t.Fatalf("UnmarshalRoutes() = %+v, want error", routes)
+					t.Fatalf("UnmarshalRoutes() = %+v, want error", mp)
 				}
 				return
 			}
 			if err != nil {
 				t.Fatalf("UnmarshalRoutes() error: %v", err)
 			}
+			routes := mp.NLRI
 			if len(routes) != 1 || int(routes[0].Length) != int(tt.input[0]) {
 				t.Errorf("UnmarshalRoutes() = %+v, want one /%d route", routes, tt.input[0])
 			}

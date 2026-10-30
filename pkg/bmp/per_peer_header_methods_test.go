@@ -260,6 +260,7 @@ func TestSessionKey(t *testing.T) {
 		a, b *PerPeerHeader
 	}{
 		{"IPv4 and IPv6 session to one BGP ID", v4(), v6()},
+		{"IPv4 peer and IPv4-mapped IPv6 peer", v4(), with(v6(), func(h *PerPeerHeader) { h.PeerAddress = net.ParseIP("::ffff:192.0.2.1").To16() })},
 		{"peer address", v4(), with(v4(), func(h *PerPeerHeader) { h.PeerAddress[15] = 2 })},
 		{"peer distinguisher", v4(), with(v4(), func(h *PerPeerHeader) { h.PeerType = PeerType1; h.PeerDistinguisher[7] = 1 })},
 		{"peer type", v4(), with(v4(), func(h *PerPeerHeader) { h.PeerType = PeerType2 })},

@@ -13,7 +13,7 @@ import (
 // L3VPN (RFC 9832 §6.1); each prefix additionally carries the route's
 // Transport Class IDs.
 func (p *producer) classfulTransport(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, update *bgp.Update) ([]ClassfulTransportPrefix, error) {
-	prfxs, err := p.rdLabeledPrefixes(nlri.GetNLRICT, nlri, op, ph, update)
+	prfxs, err := p.rdLabeledPrefixes(nlri.GetNLRICT, bgp.SAFIClassfulTransport, nlri, op, ph, update)
 	if err != nil {
 		return nil, err
 	}

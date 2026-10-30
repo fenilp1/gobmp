@@ -18,12 +18,5 @@ func UnmarshalMulticastNLRI(b []byte, s base.PathIDState, ipv6 bool) (*base.MPNL
 	if len(b) == 0 {
 		return nil, fmt.Errorf("NLRI length is 0")
 	}
-	mpnlri := base.MPNLRI{}
-	r, err := base.UnmarshalRoutes(b, s, ipv6)
-	if err != nil {
-		return nil, err
-	}
-	mpnlri.NLRI = r
-
-	return &mpnlri, nil
+	return base.UnmarshalRoutes(b, s, ipv6)
 }

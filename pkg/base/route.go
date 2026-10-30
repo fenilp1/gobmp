@@ -11,6 +11,9 @@ import (
 // MPNLRI defines a collection of Prefixes/Routes sent in NLRI of MP_REACH or MP_UNREACH attribute
 type MPNLRI struct {
 	NLRI []Route
+	// PathIDsFlipped is set when the NLRI were read with the Path ID
+	// setting opposite to the expected one; see DecodeWithPathID.
+	PathIDsFlipped bool
 }
 
 // Route defines a structure of NLRI prefix element
@@ -31,7 +34,7 @@ type Route struct {
 // with Path IDs (see DecodeWithPathID). A prefix longer than 32 bits, or 128
 // for ipv6, makes the field malformed (RFC 4271 §4.3, RFC 4760 §5, RFC 7606
 // §5.3).
-func UnmarshalRoutes(b []byte, s PathIDState, ipv6 bool) ([]Route, error) {
+func UnmarshalRoutes(b []byte, s PathIDState, ipv6 bool) (*MPNLRI, error) {
 	maxBits := 32
 	if ipv6 {
 		maxBits = 128
@@ -47,7 +50,7 @@ func UnmarshalRoutes(b []byte, s PathIDState, ipv6 bool) ([]Route, error) {
 		glog.Errorf("failed to reconstruct routes from slice %s with error: %+v", tools.MessageHex(b), err)
 		return nil, err
 	}
-	return mp.NLRI, nil
+	return mp, nil
 }
 
 func unmarshalRoutes(b []byte, pathID bool, maxBits int) ([]Route, error) {

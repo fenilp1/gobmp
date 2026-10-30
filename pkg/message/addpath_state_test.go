@@ -14,7 +14,9 @@ import (
 // and the received OPEN the peer's (RFC 7854 §4.10). Adj-RIB-In holds routes
 // from the peer to the router, Adj-RIB-Out (O flag) routes from the router to
 // the peer (RFC 8671 §4), and a Loc-RIB uses Path IDs whenever the capability
-// is present (RFC 9069 §5.2).
+// is present (RFC 9069 §5.2). Post-policy Adj-RIB-In and pre-policy
+// Adj-RIB-Out, whose encoding no RFC fixes, get the same answer as an
+// expected state only.
 func TestSessionPathIDs(t *testing.T) {
 	open := func(ap byte) *bgp.OpenMessage {
 		o := &bgp.OpenMessage{Capabilities: bgp.Capability{}}
@@ -28,14 +30,25 @@ func TestSessionPathIDs(t *testing.T) {
 		out
 		locRIB
 	)
-	header := func(t *testing.T, rib int) *bmp.PerPeerHeader {
+	// The views of each RIB: strict first, then the expected-only one.
+	headers := func(t *testing.T, rib int) []*bmp.PerPeerHeader {
 		switch rib {
 		case out:
-			return makePeerHeader(t, bmp.PeerType0, 0x10) // O flag
+			return []*bmp.PerPeerHeader{
+				makePeerHeader(t, bmp.PeerType0, 0x50), // O and L flags: post-policy
+				makePeerHeader(t, bmp.PeerType0, 0x10), // O flag: pre-policy
+			}
 		case locRIB:
-			return makePeerHeader(t, bmp.PeerType3, 0x00)
+			return []*bmp.PerPeerHeader{makePeerHeader(t, bmp.PeerType3, 0x00), makePeerHeader(t, bmp.PeerType3, 0x80)}
 		}
-		return makePeerHeader(t, bmp.PeerType0, 0x00)
+		return []*bmp.PerPeerHeader{
+			makePeerHeader(t, bmp.PeerType0, 0x00), // pre-policy
+			makePeerHeader(t, bmp.PeerType0, 0x40), // L flag: post-policy
+		}
+	}
+	expect := map[base.PathIDState]base.PathIDState{
+		base.PathIDPresent: base.PathIDExpectPresent,
+		base.PathIDAbsent:  base.PathIDExpectAbsent,
 	}
 	P, A := base.PathIDPresent, base.PathIDAbsent
 	tests := []struct {
@@ -66,8 +79,14 @@ func TestSessionPathIDs(t *testing.T) {
 	for _, tt := range tests {
 		s := newSessionState(&bmp.PeerUpMessage{SentOpen: open(tt.sent), ReceivedOpen: open(tt.recv)})
 		for rib, name := range []string{"Adj-RIB-In", "Adj-RIB-Out", "Loc-RIB"} {
-			if got := s.pathIDs(header(t, rib), bgp.NLRIMessageType(1, 4)); got != tt.want[rib] {
-				t.Errorf("sent %d, received %d, %s: state %d, want %d", tt.sent, tt.recv, name, got, tt.want[rib])
+			for i, ph := range headers(t, rib) {
+				want := tt.want[rib]
+				if i == 1 && rib != locRIB {
+					want = expect[want]
+				}
+				if got := s.pathIDs(ph, bgp.NLRIMessageType(1, 4)); got != want {
+					t.Errorf("sent %d, received %d, %s view %d: state %d, want %d", tt.sent, tt.recv, name, i, got, want)
+				}
 			}
 		}
 	}
