@@ -17,6 +17,9 @@ type TLV struct {
 	// information of the SR Policy candidate path.  The contents of this
 	// sub-TLV are used by the SRPM
 	BindingSID *BindingSID `json:"binding_sid_subtlv,omitempty"`
+	// SRv6BindingSID carries the SRv6 Binding SID sub-TLVs (type 20); more
+	// than one MAY be present (RFC 9830 Section 2.4.3).
+	SRv6BindingSID []*SRv6BindingSID `json:"srv6_binding_sid_subtlv,omitempty"`
 	//PolicyName is a sub-TLV to associate a symbolic
 	// name with the SR Policy for which the candidate path is being
 	// advertised via the SR Policy NLRI.
@@ -39,8 +42,8 @@ const (
 	SEGMENTLISTSTLV = 128
 	// BSIDSTLV defines Binding SID Sub TLV code
 	BSIDSTLV = 13
-	// SRV6STLV defines SRv6 Binding SID Sub TLV code (NOT YET DEFINED)
-	SRV6STLV = 255
+	// SRV6STLV defines SRv6 Binding SID Sub TLV code (RFC 9830 Section 2.4.3)
+	SRV6STLV = 20
 	// PREFERENCESTLV defines Preference Sub TLV code
 	PREFERENCESTLV = 12
 	// ENLPSTLV defines Explicit Null Label Policy Sub TLV code
@@ -49,8 +52,8 @@ const (
 	PRIORITYSTLV = 15
 	// PATHNAMESTLV defines  Policy Candidate Path Name Sub-TLV code
 	PATHNAMESTLV = 129
-	// POLICYNAMESTLV defines Policy Name Sub-TLV Sub TLV code (NOT YET DEFINED)
-	POLICYNAMESTLV = 254
+	// POLICYNAMESTLV defines SR Policy Name Sub-TLV code (RFC 9830 Section 2.4.8)
+	POLICYNAMESTLV = 130
 )
 
 // symbolicName returns the name carried in the value of an SR Policy
@@ -190,6 +193,33 @@ func UnmarshalSRPolicyTLV(b []byte) (*TLV, error) {
 				return nil, fmt.Errorf("SR Policy pathname sub-TLV truncated at offset %d: need %d bytes, have %d", p, sl, len(b)-p)
 			}
 			tlv.PathName = symbolicName(b[p : p+sl])
+		case POLICYNAMESTLV:
+			glog.V(5).Infof("Policy Name Sub TLV")
+			// RFC 9830 Section 2.4.8: 2-octet Length, RESERVED(1), Policy Name.
+			if p+2 > len(b) {
+				return nil, fmt.Errorf("SR Policy sub-TLV %d truncated at offset %d: need 2 bytes for length, have %d", st, p, len(b)-p)
+			}
+			sl = int(binary.BigEndian.Uint16(b[p : p+2]))
+			p += 2
+			if p+sl > len(b) {
+				return nil, fmt.Errorf("SR Policy policy name sub-TLV truncated at offset %d: need %d bytes, have %d", p, sl, len(b)-p)
+			}
+			tlv.Name = symbolicName(b[p : p+sl])
+		case SRV6STLV:
+			glog.V(5).Infof("SRv6 Binding SID Sub TLV")
+			if p >= len(b) {
+				return nil, fmt.Errorf("SR Policy sub-TLV %d truncated at offset %d: need 1 byte for length, have %d", st, p, len(b)-p)
+			}
+			sl = int(b[p])
+			p++
+			if p+sl > len(b) {
+				return nil, fmt.Errorf("SR Policy SRv6 BSID sub-TLV truncated at offset %d: need %d bytes, have %d", p, sl, len(b)-p)
+			}
+			s, err := UnmarshalSRv6BindingSIDSTLV(b[p : p+sl])
+			if err != nil {
+				return nil, err
+			}
+			tlv.SRv6BindingSID = append(tlv.SRv6BindingSID, s)
 		default:
 			glog.Warningf("SR Policy Sub TLV %+v is not supported", st)
 			// Per RFC 9256 Section 2.4.1, sub-TLV types 128-255 use 2-byte length.

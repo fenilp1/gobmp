@@ -6,6 +6,15 @@ Message updates and major project changes should be documented here.
 
 ### 2026-10-30
 
+#### Added
+
+- SR Policy sub-TLVs 130 (SR Policy Name, RFC 9830 §2.4.8) and 20 (SRv6 Binding SID, RFC 9830 §2.4.3) are decoded instead of skipped as "not supported": `policy_name` is populated, and a new `srv6_binding_sid` array carries `flags`, `srv6_bsid` and the optional 8-octet `srv6_endpoint_behavior`
+
+#### Changed
+
+- **Breaking:** `srpolicy.SRV6STLV` changes from 255 to 20 and `srpolicy.POLICYNAMESTLV` from 254 to 130 (RFC 9830 §6.3; the old values were placeholders)
+- An SRv6 Binding SID sub-TLV (20) whose length is not 18 or 26 (RFC 9830 §2.4.3) makes the SR Policy update malformed: no SR Policy message is published for it, as for a malformed Binding SID sub-TLV (13), following the treat-as-withdraw rule of RFC 9830 §5
+
 #### Fixed
 
 - SR Policy `policy_path_name` (Candidate Path Name sub-TLV 129) no longer starts with the RESERVED octet: RFC 9830 §2.4.7 puts 1 RESERVED octet before the name, so an RFC-encoded name `main` reads `"main"` instead of `"\u0000main"`

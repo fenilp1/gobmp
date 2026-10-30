@@ -75,6 +75,9 @@ func (p *producer) srpolicy(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, upda
 		if tlv.BindingSID != nil {
 			prfx.BSID = tlv.BindingSID
 		}
+		if len(tlv.SRv6BindingSID) != 0 {
+			prfx.SRv6BSID = tlv.SRv6BindingSID
+		}
 		if tlv.Preference != nil {
 			prfx.Preference = tlv.Preference
 		}

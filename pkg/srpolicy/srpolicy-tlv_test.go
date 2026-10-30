@@ -1,8 +1,11 @@
 package srpolicy
 
 import (
+	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"flag"
+	"strings"
 	"testing"
 
 	"github.com/go-test/deep"
@@ -809,5 +812,70 @@ func TestUnmarshalSRPolicyTLV_PathNameReserved(t *testing.T) {
 	}
 	if tlv.PathName != "main" {
 		t.Errorf("PathName = %q, want %q", tlv.PathName, "main")
+	}
+}
+
+// TestUnmarshalSRPolicyTLV_SRv6BindingSID builds sub-TLV 20 per RFC 9830
+// Section 2.4.3 Figure 7: Type 20, Length 18 or 26, Flags |S|I|B| (Figure 8),
+// RESERVED, 16-octet SRv6 BSID, optional 8-octet SRv6 Endpoint Behavior and
+// SID Structure (Section 2.4.4.2.4 Figure 14).
+func TestUnmarshalSRPolicyTLV_SRv6BindingSID(t *testing.T) {
+	sid := []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01} // 2001:db8::1
+	ebss := []byte{0x00, 0x13, 0x00, 0x00, 0x20, 0x10, 0x10, 0x00}               // behavior 19, Reserved, LB 32 LN 16 Fun 16 Arg 0
+	wrapTLV := func(sub []byte) []byte {
+		return append([]byte{0x00, 0x0f, byte(len(sub) >> 8), byte(len(sub))}, sub...)
+	}
+	short := append([]byte{0x14, 0x12, SRv6BSIDFlagS, 0xff}, sid...) // RESERVED 0xff ignored
+	long := append(append([]byte{0x14, 0x1a, SRv6BSIDFlagI | SRv6BSIDFlagB, 0x00}, sid...), ebss...)
+
+	tlv, err := UnmarshalSRPolicyTLV(wrapTLV(append(append([]byte{}, short...), long...)))
+	if err != nil {
+		t.Fatalf("UnmarshalSRPolicyTLV() error = %v", err)
+	}
+	if len(tlv.SRv6BindingSID) != 2 {
+		t.Fatalf("got %d SRv6 Binding SID sub-TLVs, want 2", len(tlv.SRv6BindingSID))
+	}
+	s0, s1 := tlv.SRv6BindingSID[0], tlv.SRv6BindingSID[1]
+	if s0.Flags != 0x80 || !bytes.Equal(s0.BSID, sid) || s0.EndpointBehavior != nil {
+		t.Errorf("first = %+v", s0)
+	}
+	if s1.Flags != 0x60 || !bytes.Equal(s1.BSID, sid) || !bytes.Equal(s1.EndpointBehavior, ebss) {
+		t.Errorf("second = %+v", s1)
+	}
+	if tlv.BindingSID != nil {
+		t.Error("SRv6 Binding SID sub-TLV must not populate the Binding SID (13) field")
+	}
+
+	for _, l := range []byte{2, 17, 19, 25, 27} {
+		v := make([]byte, l)
+		if _, err := UnmarshalSRPolicyTLV(wrapTLV(append([]byte{0x14, l}, v...))); err == nil {
+			t.Errorf("length %d: want error (RFC 9830 §2.4.3: MUST be 18 or 26)", l)
+		}
+	}
+}
+
+// TestUnmarshalSRPolicyTLV_PolicyNameAndPathName: sub-TLV 130 (SR Policy
+// Name, RFC 9830 Section 2.4.8 Figure 18) and 129 (Candidate Path Name,
+// Section 2.4.7 Figure 17) both use a 2-octet Length and a RESERVED octet,
+// and land in distinct fields.
+func TestUnmarshalSRPolicyTLV_PolicyNameAndPathName(t *testing.T) {
+	input := []byte{
+		0x00, 0x0f, 0x00, 0x0f, // Tunnel Type 15, Length 15
+		0x82, 0x00, 0x05, 0x00, 'r', 'e', 'd', '1', // Type 130, Length 5, RESERVED, "red1"
+		0x81, 0x00, 0x04, 0x00, 'c', 'p', '1', // Type 129, Length 4, RESERVED, "cp1"
+	}
+	tlv, err := UnmarshalSRPolicyTLV(input)
+	if err != nil {
+		t.Fatalf("UnmarshalSRPolicyTLV() error = %v", err)
+	}
+	if tlv.Name != "red1" || tlv.PathName != "cp1" {
+		t.Errorf("Name = %q PathName = %q, want red1 / cp1", tlv.Name, tlv.PathName)
+	}
+	b, err := json.Marshal(tlv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"policy_name_subtlv":"red1"`) || !strings.Contains(string(b), `"path_name_subtlv":"cp1"`) {
+		t.Errorf("JSON = %s", b)
 	}
 }
