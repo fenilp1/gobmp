@@ -54,9 +54,14 @@ default 30 s Kubernetes grace period; Docker's default stop timeout is 10 s, so
 raise it to at least 30 s (`docker stop -t 30`, Compose `stop_grace_period`) or
 the container is killed before the deadline. The Kafka publisher's Stop waits
 until every buffered message is delivered or fails. The NATS publisher, which
-reconnects for as long as the server is away, publishes synchronously: each
-publish returns once JetStream acknowledges it or its wait expires, so its Stop
-has nothing to flush.
+reconnects for as long as the server is away, publishes to JetStream
+asynchronously, in call order: a publish returns before its acknowledgement, so
+an acknowledgement failure or timeout (`nats_ack_timeout_ms`, default 30 s) does
+not reach the caller; it is logged, at most once a second, and the message is
+lost. Once `nats_max_pending_acks` (default 4096) acknowledgements are
+outstanding, as during a JetStream outage, a publish waits for one, stalling
+reads from that BMP connection. The NATS publisher's Stop waits up to 10 s for
+outstanding acknowledgements.
 
 Regression tests exercise actual BMP wire frames through the parser/producer
 pipeline, including announcement, withdrawal, explicit End-of-RIB and Peer Down,

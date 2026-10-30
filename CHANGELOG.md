@@ -6,6 +6,10 @@ Message updates and major project changes should be documented here.
 
 ### 2026-10-30
 
+#### Changed
+
+- NATS publisher publishes to JetStream asynchronously in call order instead of waiting for each message's acknowledgement, with at most `nats_max_pending_acks` (`--nats-max-pending-acks`, default 4096) messages awaiting one and `nats_ack_timeout_ms` (`--nats-ack-timeout-ms`, default 30000) to wait for each. Acknowledgement failures and timeouts no longer reach the caller: they are logged, at most once a second, and the message is lost. During a JetStream outage publishing blocks once the limit is reached, stalling BMP reads (backpressure), and messages whose acknowledgement times out are lost. Stop waits up to 10 s for outstanding acknowledgements, and a publish after Stop returns an error
+
 #### Fixed
 
 - SIGTERM (docker stop, Kubernetes pod termination) killing gobmp without publishing what it had read: it now shuts down as on SIGINT, bounded at 25 s (exit status 1 on overrun), and a second signal exits at once; Docker's default 10 s stop timeout must be raised to at least 30 s (`docker stop -t`, `stop_grace_period`) for the 25 s to apply

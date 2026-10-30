@@ -14,11 +14,25 @@ type fakeJetStream struct {
 	addStreamFn    func(*natsgo.StreamConfig, ...natsgo.JSOpt) (*natsgo.StreamInfo, error)
 	streamInfoFn   func(string, ...natsgo.JSOpt) (*natsgo.StreamInfo, error)
 	updateStreamFn func(*natsgo.StreamConfig, ...natsgo.JSOpt) (*natsgo.StreamInfo, error)
+	publishFn      func(*natsgo.Msg) error
+	completeFn     func() <-chan struct{}
 }
 
-func (f *fakeJetStream) PublishMsg(m *natsgo.Msg, _ ...natsgo.PubOpt) (*natsgo.PubAck, error) {
+func (f *fakeJetStream) PublishMsgAsync(m *natsgo.Msg, _ ...natsgo.PubOpt) (natsgo.PubAckFuture, error) {
+	if f.publishFn != nil {
+		return nil, f.publishFn(m)
+	}
 	return nil, nil
 }
+func (f *fakeJetStream) PublishAsyncComplete() <-chan struct{} {
+	if f.completeFn != nil {
+		return f.completeFn()
+	}
+	ch := make(chan struct{})
+	close(ch)
+	return ch
+}
+func (f *fakeJetStream) PublishAsyncPending() int { return 0 }
 func (f *fakeJetStream) AddStream(cfg *natsgo.StreamConfig, opts ...natsgo.JSOpt) (*natsgo.StreamInfo, error) {
 	return f.addStreamFn(cfg, opts...)
 }
