@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/golang/glog"
@@ -184,19 +185,30 @@ type Producer interface {
 	SetConfig(config *Config) error
 }
 
+// producer publishes what the messages of one BMP connection produce.
+//
+// Jobs run on shallow copies of the producer (see runJob), so every field
+// but producerState must not change once Producer starts: SetConfig is
+// called before, and all mutable state lives in producerState.
 type producer struct {
 	publisher pub.Publisher
 
-	// speakerReady is closed once the first valid PeerUp has established the
-	// initial identity cache. RouteMonitor and StatsReport workers wait on it so
-	// active-mode initial routes do not race ahead of their PeerUp identity.
-	speakerReady     chan struct{}
-	speakerReadyOnce sync.Once
-	// stopCh is set to the stop channel passed to Producer() before the dispatch
-	// loop starts.  producingWorker goroutines select on it alongside speakerReady
-	// so they can exit cleanly if the producer is shut down before any PeerUp
-	// arrives (e.g. the connection drops before BGP session establishment).
-	stopCh chan struct{}
+	// If splitAF is set to true, ipv4 and ipv6 messages will go into separate topics
+	splitAF bool
+	// collectorAdminID is the collector identifier string for OpenBMP binary header
+	collectorAdminID string
+	// adminHash is the MD5 hash of the admin ID for RAW messages
+	adminHash string
+
+	// producerState is the state the producer's jobs share. It is held by
+	// pointer so that a job can run on a shallow copy of the producer with
+	// its own publisher (see runJob).
+	*producerState
+}
+
+// producerState holds the mutable state of a producer, shared by all copies
+// of it.
+type producerState struct {
 	// sessions holds the state of each monitored session, keyed by
 	// bmp.PerPeerHeader.SessionKey, from its Peer Up to its Peer Down.
 	sessionLock sync.RWMutex
@@ -205,41 +217,111 @@ type producer struct {
 	// and AFI/SAFI, to rate limit the warning.
 	pathIDWarnLock sync.Mutex
 	pathIDWarned   map[string]time.Time
-	// If splitAF is set to true, ipv4 and ipv6 messages will go into separate topics
-	splitAF bool
-	// collectorAdminID is the collector identifier string for OpenBMP binary header
-	collectorAdminID string
-	// adminHash is the MD5 hash of the admin ID for RAW messages
-	adminHash    string
-	identityLock sync.RWMutex
-	identities   map[string]bmp.PeerIdentity
-	speakerID    bmp.PeerIdentity
+	identityLock   sync.RWMutex
+	identities     map[string]bmp.PeerIdentity
+	speakerID      bmp.PeerIdentity
+	// panicked is set once a job's panic was logged with its stack.
+	panicked atomic.Bool
 }
 
-// Producer dispatches kafka workers upon request received from the channel
+func newProducerState() *producerState {
+	return &producerState{
+		sessions:   make(map[string]sessionState),
+		identities: make(map[string]bmp.PeerIdentity),
+	}
+}
+
+// state returns the producer's shared state, setting it up for a producer
+// not made by NewProducer, such as a test's &producer{} literal. The first
+// call must come before the producer is shared between goroutines, as the
+// set up is not synchronized; Producer makes it before starting any.
+func (p *producer) state() *producerState {
+	if p.producerState == nil {
+		p.producerState = newProducerState()
+	}
+	return p.producerState
+}
+
+// Producer reads the messages of one BMP connection from queue and publishes
+// what they produce in the order they arrive. Peer Up and Peer Down messages,
+// which change the state later messages are decoded with, are processed as
+// they are read; the other messages are decoded concurrently, at most window
+// at a time, with the state attached as they are read. When window messages
+// wait to be published, Producer stops reading queue, which in turn holds up
+// the parser and the BMP connection.
+//
+// A Route Monitoring or Stats message read before any Peer Up of the
+// connection, which RFC 7854 §3.3 does not allow but a Peer Up the parser
+// dropped causes, is published at once with the router identity of the TCP
+// source (identityFromHeaderFallback). Earlier versions held such messages
+// until the first Peer Up and gave them its router identity, so their
+// router_hash differs now. Holding them leaked their goroutines for ever
+// when no Peer Up came, and with publishing in arrival order it would stall
+// the whole connection behind them.
+//
+// Once queue is closed, Producer publishes all it has read and returns. Once
+// stop is closed, it stops reading and dispatching and drops what waits to
+// be published, but it still waits for the jobs in progress and for a
+// PublishMessage call in progress to return, which a stuck publisher may
+// never do. The server always drains, by closing queue, rather than closing
+// stop, so a stuck publisher is bounded only by the shutdown deadline in
+// main.
 func (p *producer) Producer(queue chan bmp.Message, stop chan struct{}) {
-	// Store stop before spawning any goroutine.  The Go memory model guarantees
-	// that all goroutines created inside the loop below observe this write.
-	p.stopCh = stop
+	p.state()
+	slots := make(chan *slot, window)
+	outDone := make(chan struct{})
+	go func() {
+		defer close(outDone)
+		p.output(slots, stop)
+	}()
+	var jobs sync.WaitGroup
+	defer func() {
+		close(slots)
+		jobs.Wait()
+		<-outDone
+	}()
 	for {
+		var msg bmp.Message
+		var ok bool
 		select {
-		case msg := <-queue:
-			switch msg.Payload.(type) {
-			case *bmp.PeerUpMessage, *bmp.PeerDownMessage:
-				// State changes update identity cache and publish in input order.
-				p.producingWorker(msg)
-			default:
-				// Other message types carry an identity and session state
-				// snapshot and can fan out.
-				p.attachIdentitySnapshot(&msg)
-				p.attachSessionSnapshot(&msg)
-				go p.producingWorker(msg)
-			}
+		case msg, ok = <-queue:
 		case <-stop:
 			glog.Infof("received interrupt, stopping.")
 			return
 		}
+		if !ok {
+			return
+		}
+		s := newSlot()
+		select {
+		case slots <- s:
+		case <-stop:
+			glog.Infof("received interrupt, stopping.")
+			return
+		}
+		switch msg.Payload.(type) {
+		case *bmp.PeerUpMessage, *bmp.PeerDownMessage:
+			// State changes update the identity and session state before
+			// the next message is read.
+			p.runJob(s, msg)
+		default:
+			// Other message types carry an identity and session state
+			// snapshot and are decoded concurrently.
+			p.snapshot(&msg)
+			jobs.Add(1)
+			go func() {
+				defer jobs.Done()
+				p.runJob(s, msg)
+			}()
+		}
 	}
+}
+
+// snapshot attaches the current identity and session state to the per-peer
+// header of msg, which it makes a copy of.
+func (p *producer) snapshot(msg *bmp.Message) {
+	p.attachIdentitySnapshot(msg)
+	p.attachSessionSnapshot(msg)
 }
 
 // attachSessionSnapshot attaches the current state of the message's session
@@ -261,9 +343,10 @@ func (p *producer) attachIdentitySnapshot(msg *bmp.Message) {
 	var peerExists bool
 	peerKey := msg.PeerHeader.PeerIdentity()
 	if peerKey != "" {
-		p.identityLock.RLock()
-		peer, peerExists = p.identities[peerKey]
-		p.identityLock.RUnlock()
+		st := p.state()
+		st.identityLock.RLock()
+		peer, peerExists = st.identities[peerKey]
+		st.identityLock.RUnlock()
 	}
 	if !peerExists {
 		peer = p.identityFromHeaderFallback(*msg)
@@ -276,9 +359,10 @@ func (p *producer) attachIdentitySnapshot(msg *bmp.Message) {
 func (p *producer) identityFromHeaderFallback(msg bmp.Message) bmp.PeerIdentity {
 	peer := bmp.IdentityFromPeerHeader(msg)
 
-	p.identityLock.RLock()
-	speakerID := p.speakerID
-	p.identityLock.RUnlock()
+	st := p.state()
+	st.identityLock.RLock()
+	speakerID := st.speakerID
+	st.identityLock.RUnlock()
 
 	if speakerID.RouterIP == "" && speakerID.RouterHash == "" {
 		return peer
@@ -300,25 +384,27 @@ func (p *producer) producingWorker(msg bmp.Message) {
 			peerID := msg.PeerHeader.PeerIdentity()
 			peer = bmp.IdentityFromPeerUp(msg)
 			if peerID != "" {
-				p.identityLock.Lock()
-				if p.identities == nil {
-					p.identities = make(map[string]bmp.PeerIdentity)
-				}
-				cachedPeer, ok := p.identities[peerID]
-				peerExists = ok
-				if !peerExists {
-					p.identities[peerID] = peer
-					glog.V(5).Infof("New peer identity stored for peer %s: %s", peerID, peer)
-				} else if !cachedPeer.IsEqual(peer) {
-					glog.Warningf("Peer identity changed for peer %s: old=%s, new=%s", peerID, cachedPeer, peer)
-					p.identities[peerID] = peer
-				} else {
-					glog.V(5).Infof("Duplicate PeerUP message for peer %s: %s", peerID, peer)
-				}
-				if p.speakerID.RouterIP == "" || !isSpecificAddress(p.speakerID.RouterIP) {
-					p.speakerID = peer
-				}
-				p.identityLock.Unlock()
+				st := p.state()
+				// Unlock in a defer: a panic is recovered (see runJob), and
+				// a lock left held would block the connection for ever.
+				func() {
+					st.identityLock.Lock()
+					defer st.identityLock.Unlock()
+					cachedPeer, ok := st.identities[peerID]
+					peerExists = ok
+					if !peerExists {
+						st.identities[peerID] = peer
+						glog.V(5).Infof("New peer identity stored for peer %s: %s", peerID, peer)
+					} else if !cachedPeer.IsEqual(peer) {
+						glog.Warningf("Peer identity changed for peer %s: old=%s, new=%s", peerID, cachedPeer, peer)
+						st.identities[peerID] = peer
+					} else {
+						glog.V(5).Infof("Duplicate PeerUP message for peer %s: %s", peerID, peer)
+					}
+					if st.speakerID.RouterIP == "" || !isSpecificAddress(st.speakerID.RouterIP) {
+						st.speakerID = peer
+					}
+				}()
 			}
 		}
 		if m, err := p.producePeerMessage(peerUP, msg, peer); err != nil {
@@ -337,11 +423,12 @@ func (p *producer) producingWorker(msg bmp.Message) {
 		}
 		var peer bmp.PeerIdentity
 		var peerExists bool
+		st := p.state()
 		peerID := msg.PeerHeader.PeerIdentity()
 		if peerID != "" {
-			p.identityLock.RLock()
-			peer, peerExists = p.identities[peerID]
-			p.identityLock.RUnlock()
+			st.identityLock.RLock()
+			peer, peerExists = st.identities[peerID]
+			st.identityLock.RUnlock()
 		}
 
 		if !peerExists {
@@ -353,36 +440,32 @@ func (p *producer) producingWorker(msg bmp.Message) {
 		}
 		// Remove the peer identity from the cache if it exists, since the peer is now down
 		if peerExists {
-			p.identityLock.Lock()
-			delete(p.identities, peerID)
-			p.identityLock.Unlock()
+			st.identityLock.Lock()
+			delete(st.identities, peerID)
+			st.identityLock.Unlock()
 		}
 		// Publish using the identity snapshot captured before cache removal.
 		if err := p.marshalAndPublish(m, bmp.PeerStateChangeMsg, []byte(m.RouterHash)); err != nil {
 			glog.Errorf("failed to process peer message with error: %+v", err)
 		}
 	case *bmp.RouteMonitor:
-		// Wait for the first identity before processing initial route messages.
-		select {
-		case <-p.speakerReady:
-		case <-p.stopCh:
-			return
-		}
-		p.attachIdentitySnapshot(&msg)
+		p.snapshotOnce(&msg)
 		p.produceRouteMonitorMessage(msg)
 	case *bmp.StatsReport:
-		// Same cancellable wait as RouteMonitor above.
-		select {
-		case <-p.speakerReady:
-		case <-p.stopCh:
-			return
-		}
-		p.attachIdentitySnapshot(&msg)
+		p.snapshotOnce(&msg)
 		p.produceStatsMessage(msg)
 	case *bmp.RawMessage:
 		p.produceRawMessage(msg)
 	default:
 		glog.Warningf("got Unknown message %T to push to the producer, ignoring it...", obj)
+	}
+}
+
+// snapshotOnce attaches the current identity and session state to msg unless
+// Producer did as it read it.
+func (p *producer) snapshotOnce(msg *bmp.Message) {
+	if msg.PeerHeader != nil && msg.PeerHeader.Session == nil {
+		p.snapshot(msg)
 	}
 }
 
@@ -410,12 +493,13 @@ func (p *producer) SetConfig(config *Config) error {
 func (p *producer) storeSession(ph *bmp.PerPeerHeader, s sessionState) {
 	key := ph.SessionKey()
 	s.peerUps = 1
-	p.sessionLock.Lock()
-	defer p.sessionLock.Unlock()
-	if old, ok := p.sessions[key]; ok && ph.PeerType == bmp.PeerType3 {
+	st := p.state()
+	st.sessionLock.Lock()
+	defer st.sessionLock.Unlock()
+	if old, ok := st.sessions[key]; ok && ph.PeerType == bmp.PeerType3 {
 		s = mergeLocRIB(old, s)
 	}
-	p.sessions[key] = s
+	st.sessions[key] = s
 }
 
 // deleteSession removes the state of the session that the Peer Down with
@@ -425,25 +509,26 @@ func (p *producer) storeSession(ph *bmp.PerPeerHeader, s sessionState) {
 // Down of the last one.
 func (p *producer) deleteSession(ph *bmp.PerPeerHeader) {
 	key := ph.SessionKey()
+	st := p.state()
 	deleted := func() bool {
-		p.sessionLock.Lock()
-		defer p.sessionLock.Unlock()
-		if s, ok := p.sessions[key]; ok && s.peerUps > 1 {
+		st.sessionLock.Lock()
+		defer st.sessionLock.Unlock()
+		if s, ok := st.sessions[key]; ok && s.peerUps > 1 {
 			s.peerUps--
-			p.sessions[key] = s
+			st.sessions[key] = s
 			return false
 		}
-		delete(p.sessions, key)
+		delete(st.sessions, key)
 		return true
 	}()
 	if !deleted {
 		return
 	}
-	p.pathIDWarnLock.Lock()
-	defer p.pathIDWarnLock.Unlock()
-	for k := range p.pathIDWarned {
+	st.pathIDWarnLock.Lock()
+	defer st.pathIDWarnLock.Unlock()
+	for k := range st.pathIDWarned {
 		if strings.HasPrefix(k, key+"/") {
-			delete(p.pathIDWarned, k)
+			delete(st.pathIDWarned, k)
 		}
 	}
 }
@@ -456,9 +541,10 @@ func (p *producer) session(ph *bmp.PerPeerHeader) (sessionState, bool) {
 		return snap.s, snap.ok
 	}
 	key := ph.SessionKey()
-	p.sessionLock.RLock()
-	defer p.sessionLock.RUnlock()
-	s, ok := p.sessions[key]
+	st := p.state()
+	st.sessionLock.RLock()
+	defer st.sessionLock.RUnlock()
+	s, ok := st.sessions[key]
 	return s, ok
 }
 
@@ -514,16 +600,17 @@ func (p *producer) checkDecoded(ph *bmp.PerPeerHeader, afi uint16, safi uint8, m
 	}
 	key := fmt.Sprintf("%s/%d/%d", ph.SessionKey(), afi, safi)
 	now := time.Now()
+	st := p.state()
 	warn := func() bool {
-		p.pathIDWarnLock.Lock()
-		defer p.pathIDWarnLock.Unlock()
-		if last, ok := p.pathIDWarned[key]; ok && now.Sub(last) < pathIDWarnInterval {
+		st.pathIDWarnLock.Lock()
+		defer st.pathIDWarnLock.Unlock()
+		if last, ok := st.pathIDWarned[key]; ok && now.Sub(last) < pathIDWarnInterval {
 			return false
 		}
-		if p.pathIDWarned == nil {
-			p.pathIDWarned = make(map[string]time.Time)
+		if st.pathIDWarned == nil {
+			st.pathIDWarned = make(map[string]time.Time)
 		}
-		p.pathIDWarned[key] = now
+		st.pathIDWarned[key] = now
 		return true
 	}()
 	if warn {
@@ -550,10 +637,8 @@ func (p *producer) GetTableName(ph *bmp.PerPeerHeader) string {
 // NewProducer instantiates a new instance of a producer with Publisher interface
 func NewProducer(publisher pub.Publisher, splitAF bool) Producer {
 	return &producer{
-		publisher:    publisher,
-		splitAF:      splitAF,
-		sessions:     make(map[string]sessionState),
-		speakerReady: make(chan struct{}),
-		identities:   make(map[string]bmp.PeerIdentity),
+		publisher:     publisher,
+		splitAF:       splitAF,
+		producerState: newProducerState(),
 	}
 }

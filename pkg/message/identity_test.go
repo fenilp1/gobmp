@@ -392,7 +392,6 @@ func TestProducingWorkerRefreshesIdentityAfterReady(t *testing.T) {
 	ph := makePeerHeader(t, bmp.PeerType0, 0)
 	cached := attachTestIdentity(ph, "192.0.2.10", "cached-router").Identity
 	p.identities[ph.PeerIdentity()] = cached
-	close(p.speakerReady)
 
 	statValue := make([]byte, 4)
 	binary.BigEndian.PutUint32(statValue, 42)

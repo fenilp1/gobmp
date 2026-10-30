@@ -58,10 +58,6 @@ func (p *producer) producePeerMessage(op int, msg bmp.Message, peerID bmp.PeerId
 		m.IsIPv4 = !msg.PeerHeader.IsRemotePeerIPv6()
 		m.LocalIP = peerUpMsg.GetLocalAddressString()
 
-		p.speakerReadyOnce.Do(func() {
-			close(p.speakerReady)
-		})
-
 		m.LocalASN = uint32(peerUpMsg.SentOpen.MyAS)
 		if lasn, ok := peerUpMsg.SentOpen.Is4BytesASCapable(); ok {
 			// Local BGP speaker is 4 bytes AS capable

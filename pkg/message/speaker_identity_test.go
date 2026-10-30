@@ -14,16 +14,32 @@ func md5Hex(s string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// assertSpeakerReady fails unless the producer released the route monitor and
-// stats goroutines waiting on the first PeerUp.  Choosing a different address
-// for the speaker must never turn into a decision not to latch at all: those
-// goroutines block on this channel and would never produce a message again.
-func assertSpeakerReady(t *testing.T, p *producer) {
+// assertSpeakerReady fails unless a route monitor or stats message of the
+// speaker after its PeerUp is produced with the PeerUp's router identity.
+// Choosing a different address for the speaker must never turn into a
+// decision not to latch at all.
+func assertSpeakerReady(t *testing.T, p *producer, peerUp PeerStateChange) {
 	t.Helper()
-	select {
-	case <-p.speakerReady:
-	default:
-		t.Fatal("speakerReady is still open after PeerUp, route monitor messages would block forever")
+	rec := p.publisher.(*recordingPublisher)
+	n := len(rec.msgs)
+	ph := makePeerHeader(t, bmp.PeerType0, 0x00)
+	ph.PeerAddress = make([]byte, 16)
+	ph.PeerAddress[15] = 99 // a peer with no PeerUp of its own
+	p.producingWorker(bmp.Message{
+		PeerHeader: ph,
+		Payload: &bmp.StatsReport{StatsTLV: []bmp.InformationalTLV{
+			{InformationType: 0, InformationLength: 4, Information: make([]byte, 4)},
+		}},
+	})
+	if len(rec.msgs) != n+1 {
+		t.Fatalf("published %d stats messages after PeerUp, want 1", len(rec.msgs)-n)
+	}
+	var got Stats
+	if err := json.Unmarshal(rec.msgs[n].payload, &got); err != nil {
+		t.Fatalf("unmarshal published stats message failed: %v", err)
+	}
+	if got.RouterIP != peerUp.RouterIP || got.RouterHash != peerUp.RouterHash {
+		t.Errorf("stats router = %q/%q, want the PeerUp's %q/%q", got.RouterIP, got.RouterHash, peerUp.RouterIP, peerUp.RouterHash)
 	}
 }
 
@@ -118,7 +134,7 @@ func TestSpeakerIdentity_LocRIBPeerUpUsesConnectionAddress(t *testing.T) {
 	if want := md5Hex("10.20.0.1"); got.RouterHash != want {
 		t.Errorf("RouterHash = %q, want %q", got.RouterHash, want)
 	}
-	assertSpeakerReady(t, p)
+	assertSpeakerReady(t, p, got)
 }
 
 // TestSpeakerIdentity_TwoLocRIBSpeakersStayDistinct is the regression this fix
@@ -161,7 +177,7 @@ func TestSpeakerIdentity_EstablishedSessionUnchanged(t *testing.T) {
 	if want := md5Hex("192.168.1.1"); got.RouterHash != want {
 		t.Errorf("RouterHash = %q, want %q", got.RouterHash, want)
 	}
-	assertSpeakerReady(t, p)
+	assertSpeakerReady(t, p, got)
 }
 
 // TestSpeakerIdentity_NoConnectionAddress covers the case where nothing
@@ -175,5 +191,5 @@ func TestSpeakerIdentity_NoConnectionAddress(t *testing.T) {
 	if got.RouterIP != "0.0.0.0" {
 		t.Errorf("RouterIP = %q, want %q", got.RouterIP, "0.0.0.0")
 	}
-	assertSpeakerReady(t, p)
+	assertSpeakerReady(t, p, got)
 }
