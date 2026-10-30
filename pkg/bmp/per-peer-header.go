@@ -363,10 +363,19 @@ func (p *PerPeerHeader) GetTableKey() string {
 // identify a Loc-RIB instance (RFC 9069 §6.1.1); its Peer Address is zero
 // (RFC 9069 §5.1).
 func (p *PerPeerHeader) SessionKey() string {
+	var buf [96]byte
+	b := strconv.AppendUint(buf[:0], uint64(p.PeerType), 10)
+	b = append(b, '|')
+	b = hex.AppendEncode(b, p.PeerDistinguisher)
+	b = append(b, '|')
 	if p.PeerType == PeerType3 {
-		return fmt.Sprintf("%d|%x|%s", p.PeerType, p.PeerDistinguisher, p.GetPeerBGPIDString())
+		b = append(b, p.GetPeerBGPIDString()...)
+		return string(b)
 	}
-	return fmt.Sprintf("%d|%x|%t|%s", p.PeerType, p.PeerDistinguisher, p.flagV, p.GetPeerAddrString())
+	b = strconv.AppendBool(b, p.flagV)
+	b = append(b, '|')
+	b = append(b, p.GetPeerAddrString()...)
+	return string(b)
 }
 
 // PeerIdentity returns the cache key for a peer identity. Peer Types 0/1/2 use
@@ -374,13 +383,23 @@ func (p *PerPeerHeader) SessionKey() string {
 // Loc-RIB and intentionally omits peer address and ASN.
 func (p *PerPeerHeader) PeerIdentity() string {
 	switch p.PeerType {
-	case PeerType0, PeerType1, PeerType2:
-		return fmt.Sprintf("%d-%s-%s-%d-%s", p.PeerType, p.GetPeerDistinguisherString(), p.GetPeerAddrString(), p.PeerAS, p.GetPeerBGPIDString())
-	case PeerType3:
-		return fmt.Sprintf("%d-%s-%s", p.PeerType, p.GetPeerDistinguisherString(), p.GetPeerBGPIDString())
+	case PeerType0, PeerType1, PeerType2, PeerType3:
 	default:
 		return ""
 	}
+	var buf [128]byte
+	b := strconv.AppendUint(buf[:0], uint64(p.PeerType), 10)
+	b = append(b, '-')
+	b = append(b, p.GetPeerDistinguisherString()...)
+	b = append(b, '-')
+	if p.PeerType != PeerType3 {
+		b = append(b, p.GetPeerAddrString()...)
+		b = append(b, '-')
+		b = strconv.AppendUint(b, uint64(p.PeerAS), 10)
+		b = append(b, '-')
+	}
+	b = append(b, p.GetPeerBGPIDString()...)
+	return string(b)
 }
 
 // PeerIdentity holds information about the peer's identity extracted from the BMP PeerUP message.
