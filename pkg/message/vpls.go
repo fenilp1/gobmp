@@ -15,7 +15,7 @@ func (p *producer) vpls(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, update *
 	if glog.V(6) {
 		glog.Infof("All attributes in vpls update: %+v", update.GetAllAttributeID())
 	}
-	vpls, err := nlri.GetNLRIVPLS()
+	vplsNLRI, err := nlri.GetNLRIVPLS()
 	if err != nil {
 		return nil, err
 	}
@@ -30,7 +30,7 @@ func (p *producer) vpls(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, update *
 		return nil, fmt.Errorf("unknown operation %d", op)
 	}
 
-	for _, v := range vpls.Route {
+	for _, v := range vplsNLRI.Route {
 		prfx := VPLSPrefix{
 			Action:         operation,
 			PeerType:       uint8(ph.PeerType),
@@ -107,20 +107,19 @@ func (p *producer) vpls(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, update *
 
 					// Check for Layer2 Info Extended Community (Type 0x800A)
 					if ec[0] == 0x80 && ec[1] == 0x0a {
-						// Encapsulation Type (byte 2)
-						encapType := ec[2]
-						encapStr := getEncapTypeString(encapType)
+						// Encaps Type, Control Flags (C=0x02, S=0x01 per
+						// RFC 4761 Section 3.2.4 Figure 4) and Layer-2 MTU
+						l2, err := vpls.DecodeLayer2InfoValue(ec[2:])
+						if err != nil {
+							continue
+						}
+						encapStr := vpls.EncapTypeToString(l2.EncapType)
 						prfx.EncapType = &encapStr
-
-						// Control Flags (byte 3)
-						flags := ec[3]
-						controlWord := (flags & 0x01) != 0
-						sequencedDel := (flags & 0x02) != 0
+						controlWord := l2.ControlWord
+						sequencedDel := l2.SequencedDel
 						prfx.ControlWord = &controlWord
 						prfx.SequencedDel = &sequencedDel
-
-						// MTU (bytes 4-5)
-						mtu := uint16(ec[4])<<8 | uint16(ec[5])
+						mtu := l2.MTU
 						prfx.MTU = &mtu
 
 						if glog.V(6) {
@@ -175,12 +174,6 @@ func (p *producer) vpls(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, update *
 	}
 
 	return prfxs, nil
-}
-
-// getEncapTypeString returns the IANA "BGP Layer 2 Encapsulation Types" name
-// (RFC 6624 Section 7) for an Encaps Type.
-func getEncapTypeString(encapType uint8) string {
-	return vpls.EncapTypeToString(encapType)
 }
 
 // parseRouteTargetString parses Route Target Extended Community and returns string representation

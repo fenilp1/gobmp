@@ -15,13 +15,13 @@ func TestParseLayer2InfoExtComm(t *testing.T) {
 			name: "Valid Layer2 Info - Ethernet with Control Word",
 			// Type: 0x800a (handled by caller)
 			// Encap: Ethernet (VLAN) Tagged Mode (4)
-			// Flags: C=1, S=0 (0x01)
+			// Flags: C=1, S=0 (0x02; RFC 4761 Figure 4 puts S in the LSB)
 			// MTU: 1500 (0x05dc)
 			// Reserved: 0x0000
 			input: []byte{
 				0x80, 0x0a, // Type
 				0x04,       // Encap: Ethernet
-				0x01,       // Flags: C=1
+				0x02,       // Flags: C=1
 				0x05, 0xdc, // MTU: 1500
 				0x00, 0x00, // Reserved
 			},
@@ -439,5 +439,50 @@ func TestRouteTarget_String(t *testing.T) {
 				t.Errorf("String() = %s, want %s", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestDecodeLayer2InfoValue_FlagBits pins the Control Flags bit positions:
+// |Z|Z|Z|Z|T|R|C|S| with S in the least significant bit (RFC 4761 Section
+// 3.2.4 Figure 4; T and R added by RFC 8395 Section 2 Figure 2).
+func TestDecodeLayer2InfoValue_FlagBits(t *testing.T) {
+	tests := []struct {
+		flags      byte
+		t, r, c, s bool
+		str        string
+	}{
+		{0x00, false, false, false, false, "none"},
+		{0x01, false, false, false, true, "S"},
+		{0x02, false, false, true, false, "C"},
+		{0x04, false, true, false, false, "R"},
+		{0x08, true, false, false, false, "T"},
+		{0xff, true, true, true, true, "T,R,C,S"}, // Z bits ignored
+	}
+	for _, tt := range tests {
+		l, err := DecodeLayer2InfoValue([]byte{EncapVPLS, tt.flags, 0x05, 0xdc, 0x00, 0x00})
+		if err != nil {
+			t.Fatalf("flags 0x%02x: %v", tt.flags, err)
+		}
+		if l.FlowLabelTx != tt.t || l.FlowLabelRx != tt.r || l.ControlWord != tt.c || l.SequencedDel != tt.s {
+			t.Errorf("flags 0x%02x: got T=%t R=%t C=%t S=%t", tt.flags, l.FlowLabelTx, l.FlowLabelRx, l.ControlWord, l.SequencedDel)
+		}
+		if l.EncapType != EncapVPLS || l.MTU != 1500 {
+			t.Errorf("flags 0x%02x: got encap %d MTU %d", tt.flags, l.EncapType, l.MTU)
+		}
+		want := "L2-Info: Encap=VPLS, Flags=" + tt.str + ", MTU=1500"
+		if got := l.String(); got != want {
+			t.Errorf("String() = %s, want %s", got, want)
+		}
+	}
+}
+
+// TestDecodeLayer2InfoValue_Length: the value after Type and Sub-Type is 6
+// octets (RFC 4761 Section 3.2.4 Figure 3); other lengths are rejected
+// instead of panicking.
+func TestDecodeLayer2InfoValue_Length(t *testing.T) {
+	for _, n := range []int{0, 1, 3, 4, 5, 7, 8} {
+		if l, err := DecodeLayer2InfoValue(make([]byte, n)); err == nil || l != nil {
+			t.Errorf("len %d: got %v, %v; want nil, error", n, l, err)
+		}
 	}
 }
