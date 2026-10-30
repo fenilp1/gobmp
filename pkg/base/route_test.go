@@ -194,3 +194,57 @@ func TestUnmarshalRoutes_RetrySucceeds(t *testing.T) {
 		t.Errorf("expected prefix starting with 10 (0x0a), got %v", routes[0].Prefix)
 	}
 }
+
+// TestUnmarshalRoutesWithState checks which Path ID settings each state
+// reads a field with: a known state once, an expected or unknown one with a
+// retry flipped.
+func TestUnmarshalRoutesWithState(t *testing.T) {
+	withID := []byte{0x00, 0x00, 0x00, 0x07, 0x18, 0x0a, 0x00, 0x01} // Path ID 7, 10.0.1.0/24
+	// 10.0.1.0/24 then one octet: valid only with Path IDs, as Path ID
+	// 0x180a0001 and 0.0.0.0/0.
+	noID := []byte{0x18, 0x0a, 0x00, 0x01, 0x00}
+	tests := []struct {
+		name   string
+		b      []byte
+		s      PathIDState
+		fail   bool
+		pathID uint32
+		length uint8
+		routes int // 1 if zero
+	}{
+		{name: "present", b: withID, s: PathIDPresent, pathID: 7, length: 24},
+		{name: "absent, Path IDs on the wire", b: withID[:7], s: PathIDAbsent, fail: true},
+		{name: "expect present", b: withID, s: PathIDExpectPresent, pathID: 7, length: 24},
+		{name: "expect present, none on the wire", b: noID[:4], s: PathIDExpectPresent, length: 24},
+		{name: "expect absent", b: noID[:4], s: PathIDExpectAbsent, length: 24},
+		// Path ID 7 and 10.0.1.0/24 also parse without Path IDs, as five
+		// routes, so the expected setting must be the right one.
+		{name: "expect absent, Path IDs on the wire", b: withID, s: PathIDExpectAbsent, routes: 5},
+		{name: "unknown, Path IDs on the wire", b: withID, s: PathIDUnknown, routes: 5},
+		{name: "unknown", b: noID[:4], s: PathIDUnknown, length: 24},
+		{name: "present, none on the wire", b: noID, s: PathIDPresent, pathID: 0x180a0001, length: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mp, err := UnmarshalRoutesWithState(tt.b, tt.s)
+			if tt.fail {
+				if err == nil {
+					t.Fatalf("UnmarshalRoutesWithState() = %+v, want an error", mp)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("UnmarshalRoutesWithState() error: %v", err)
+			}
+			if tt.routes != 0 {
+				if len(mp.NLRI) != tt.routes {
+					t.Errorf("UnmarshalRoutesWithState() = %+v, want %d routes", mp.NLRI, tt.routes)
+				}
+				return
+			}
+			if len(mp.NLRI) != 1 || mp.NLRI[0].PathID != tt.pathID || mp.NLRI[0].Length != tt.length {
+				t.Errorf("UnmarshalRoutesWithState() = %+v, want one route, Path ID %d, length %d", mp.NLRI, tt.pathID, tt.length)
+			}
+		})
+	}
+}

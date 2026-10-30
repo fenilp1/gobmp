@@ -114,9 +114,9 @@ func TestUnicast_NexthopFamilyWire(t *testing.T) {
 			op := 1
 			if tt.reach {
 				op = 0
-				nlri, err = bgp.UnmarshalMPReachNLRI(tt.attr, false, map[int]bool{})
+				nlri, err = bgp.UnmarshalMPReachNLRI(tt.attr, false, nil)
 			} else {
-				nlri, err = bgp.UnmarshalMPUnReachNLRI(tt.attr, map[int]bool{})
+				nlri, err = bgp.UnmarshalMPUnReachNLRI(tt.attr, nil)
 			}
 			if err != nil {
 				t.Fatalf("unmarshal error: %v", err)

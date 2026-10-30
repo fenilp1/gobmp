@@ -10,6 +10,10 @@ Message updates and major project changes should be documented here.
 
 - `l3vpn.UnmarshalL3VPNNLRIWithOptions` decodes VPN NLRI per `l3vpn.Options`; `UnmarshalL3VPNNLRI` now wraps it
 - `unicast.UnmarshalLUNLRIWithOptions` decodes labeled unicast NLRI per `unicast.Options`; `UnmarshalLUNLRI` now wraps it
+- `base.PathIDState` and state-based decoders `bgp.UnmarshalMPReachNLRIWithState`, `bgp.UnmarshalMPUnReachNLRIWithState`,
+  `base.UnmarshalRoutesWithState`, `unicast.UnmarshalUnicastNLRIWithState` and `multicast.UnmarshalMulticastNLRIWithState`;
+  the ADD-PATH map and bool forms are kept
+- `bmp.PerPeerHeader.SessionKey` identifies a monitored session: peer type, distinguisher and address (Loc-RIB: BGP ID)
 
 #### Changed
 
@@ -19,12 +23,21 @@ Message updates and major project changes should be documented here.
 - Labeled unicast withdrawals skip the Compatibility field whatever its value and publish no labels (RFC 8277 §2.4)
 - Labeled unicast IPv4 prefixes over 32 bits are dropped as malformed (RFC 8277 §2.2)
 - Labeled unicast retries a failed parse with the Path ID flag flipped either way, as L3VPN does
+- ADD-PATH and Multiple Labels state is kept per monitored session, so sessions sharing a BGP ID, or an IPv4 and an
+  IPv4-mapped IPv6 peer, stay apart and a Peer Down removes only its own
+- Path IDs are expected per direction (RFC 7911 §5): Adj-RIB-In on peer Send and router Receive, Adj-RIB-Out the reverse,
+  Loc-RIB whenever the capability is present; a failed parse is still retried with the setting flipped
+
+#### Deprecated
+
+- `bmp.PerPeerHeader.GetTableKey`, which merges sessions sharing a BGP ID: use `SessionKey`; `message.PerTableProperties` is unused
 
 #### Fixed
 
 - L3VPN withdrawals skip the 3-octet Compatibility field whatever its value and publish no labels (RFC 8277 §2.4)
 - L3VPN announcements carry one label, S bit ignored, unless the Multiple Labels Capability is negotiated (RFC 8277 §2.2, §2.3)
 - Labeled unicast announcements carry one label, S bit ignored, unless the Multiple Labels Capability is negotiated (RFC 8277 §2.2)
+- Routes of sessions with ADD-PATH in one direction only carry their Path IDs instead of being misread, e.g. as five 0.0.0.0/x routes
 - L3VPN labels are read as SRv6 SID bits only under the RFC 9252 §4 Transposition Scheme: Implicit NULL is now 3, not 48
 - L3VPN routes with an SR-MPLS-only Prefix-SID (RFC 8669) publish their MPLS label, e.g. 24001 instead of 384016
 

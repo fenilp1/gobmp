@@ -35,7 +35,29 @@ type MPReachNLRI struct {
 	// MultiLabel is the session's RFC 8277 Multiple Labels Capability state
 	// for this AFI/SAFI; it selects how labeled NLRI label stacks are read.
 	MultiLabel base.MultiLabel
-	addPath    map[int]bool
+	// PathIDs is the session's ADD-PATH state for this AFI/SAFI: whether NLRI
+	// carry Path Identifiers (RFC 7911 §3) and whether a failed parse may be
+	// retried with the Path ID flag flipped.
+	PathIDs base.PathIDState
+}
+
+// NLRIState returns the ADD-PATH and Multiple Labels Capability state that
+// NLRI of type nlriType (see NLRIMessageType) are decoded with.
+type NLRIState func(nlriType int) (base.PathIDState, base.MultiLabel)
+
+// addPathState returns the NLRIState of an ADD-PATH map keyed by NLRI type:
+// Path IDs are expected where it is true, and a failed parse is retried with
+// the flag flipped. A nil map gives a nil NLRIState.
+func addPathState(addPath map[int]bool) NLRIState {
+	if addPath == nil {
+		return nil
+	}
+	return func(nlriType int) (base.PathIDState, base.MultiLabel) {
+		if addPath[nlriType] {
+			return base.PathIDExpectPresent, base.MultiLabelUnknown
+		}
+		return base.PathIDExpectAbsent, base.MultiLabelUnknown
+	}
 }
 
 // GetAFISAFIType returns underlaying NLRI's type based on AFI/SAFI
@@ -103,8 +125,7 @@ func (mp *MPReachNLRI) GetNextHop() string {
 // GetNLRI71 check for presence of NLRI 71 in the NLRI 14 NLRI data and if exists, instantiate NLRI71 object
 func (mp *MPReachNLRI) GetNLRI71() (*ls.NLRI71, error) {
 	if mp.AddressFamilyID == 16388 && mp.SubAddressFamilyID == 71 {
-		pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
-		nlri71, err := ls.UnmarshalLSNLRI71(mp.NLRI, pathID)
+		nlri71, err := ls.UnmarshalLSNLRI71(mp.NLRI, mp.PathIDs.Expected())
 		if err != nil {
 			return nil, err
 		}
@@ -118,8 +139,7 @@ func (mp *MPReachNLRI) GetNLRI71() (*ls.NLRI71, error) {
 // RFC 9552 wire format. Per RFC 9815 Section 5.1.1, it uses the BGP-LS encoding.
 func (mp *MPReachNLRI) GetNLRI80() (*ls.NLRI71, error) {
 	if mp.AddressFamilyID == 16388 && mp.SubAddressFamilyID == 80 {
-		pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
-		return ls.UnmarshalLSNLRI71(mp.NLRI, pathID)
+		return ls.UnmarshalLSNLRI71(mp.NLRI, mp.PathIDs.Expected())
 	}
 
 	return nil, NewNLRINotFoundError(mp.AddressFamilyID, mp.SubAddressFamilyID, "MP_REACH_NLRI")
@@ -129,8 +149,7 @@ func (mp *MPReachNLRI) GetNLRI80() (*ls.NLRI71, error) {
 // in the NLRI 14 NLRI data and if AFI/SAFI matches 16388/72 instantiates an NLRI72 object.
 func (mp *MPReachNLRI) GetNLRI72() (*ls.NLRI72, error) {
 	if mp.AddressFamilyID == 16388 && mp.SubAddressFamilyID == 72 {
-		pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
-		nlri72, err := ls.UnmarshalLSNLRI72(mp.NLRI, pathID)
+		nlri72, err := ls.UnmarshalLSNLRI72(mp.NLRI, mp.PathIDs.Expected())
 		if err != nil {
 			return nil, err
 		}
@@ -156,9 +175,8 @@ func (mp *MPReachNLRI) GetNLRI73() (*srpolicy.NLRI73, error) {
 // GetNLRIL3VPN check for presence of NLRI L3VPN AFI 1 and SAFI 128 in the NLRI 14 NLRI data and if exists, instantiate L3VPN object
 func (mp *MPReachNLRI) GetNLRIL3VPN() (*base.MPNLRI, error) {
 	if (mp.AddressFamilyID == 1 || mp.AddressFamilyID == 2) && mp.SubAddressFamilyID == 128 {
-		pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
 		nlri, err := l3vpn.UnmarshalL3VPNNLRIWithOptions(mp.NLRI, l3vpn.Options{
-			PathID:     pathID,
+			PathIDs:    mp.PathIDs,
 			SRv6:       mp.SRv6,
 			MultiLabel: mp.MultiLabel,
 			AFI:        mp.AddressFamilyID,
@@ -201,8 +219,7 @@ func (mp *MPReachNLRI) GetNLRIVPLS() (*vpls.Route, error) {
 // GetNLRIUnicast check for presence of Unicast AFI 1 or 2 and SAFI 1 in the MP_REACH_NLRI data and if exists, instantiate Unicast object
 func (mp *MPReachNLRI) GetNLRIUnicast() (*base.MPNLRI, error) {
 	if (mp.AddressFamilyID == 1 || mp.AddressFamilyID == 2) && mp.SubAddressFamilyID == 1 {
-		pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
-		nlri, err := unicast.UnmarshalUnicastNLRI(mp.NLRI, pathID)
+		nlri, err := unicast.UnmarshalUnicastNLRIWithState(mp.NLRI, mp.PathIDs)
 		if err != nil {
 			return nil, err
 		}
@@ -215,8 +232,7 @@ func (mp *MPReachNLRI) GetNLRIUnicast() (*base.MPNLRI, error) {
 // GetNLRIMulticast check for presence of NLRI Multicast AFI 1 or 2 and SAFI 2 in the NLRI 14 NLRI data and if exists, instantiate Multicast object
 func (mp *MPReachNLRI) GetNLRIMulticast() (*base.MPNLRI, error) {
 	if (mp.AddressFamilyID == 1 || mp.AddressFamilyID == 2) && mp.SubAddressFamilyID == 2 {
-		pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
-		nlri, err := multicast.UnmarshalMulticastNLRI(mp.NLRI, pathID)
+		nlri, err := multicast.UnmarshalMulticastNLRIWithState(mp.NLRI, mp.PathIDs)
 		if err != nil {
 			return nil, err
 		}
@@ -229,9 +245,8 @@ func (mp *MPReachNLRI) GetNLRIMulticast() (*base.MPNLRI, error) {
 // GetNLRILU check for presence of Labeled Unicast AFI 1 or 2 and SAFI 4 in the MP_REACH_NLRI data and if exists, instantiate LU object
 func (mp *MPReachNLRI) GetNLRILU() (*base.MPNLRI, error) {
 	if (mp.AddressFamilyID == 1 || mp.AddressFamilyID == 2) && mp.SubAddressFamilyID == 4 {
-		pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
 		nlri, err := unicast.UnmarshalLUNLRIWithOptions(mp.NLRI, unicast.Options{
-			PathID:     pathID,
+			PathIDs:    mp.PathIDs,
 			MultiLabel: mp.MultiLabel,
 			AFI:        mp.AddressFamilyID,
 		})
@@ -306,21 +321,28 @@ func (mp *MPReachNLRI) GetNLRIRTC() (*rtc.Route, error) {
 // GetNLRIMUP checks whether MP_REACH_NLRI carries BGP-MUP NLRI (SAFI 85) and, if so, instantiates a MUP NLRI object.
 func (mp *MPReachNLRI) GetNLRIMUP() (*mup.Route, error) {
 	if (mp.AddressFamilyID == 1 || mp.AddressFamilyID == 2) && mp.SubAddressFamilyID == mup.SAFI {
-		pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
-		return mup.UnmarshalMUPNLRI(mp.NLRI, mp.AddressFamilyID == 2, pathID)
+		return mup.UnmarshalMUPNLRI(mp.NLRI, mp.AddressFamilyID == 2, mp.PathIDs.Expected())
 	}
 
 	return nil, NewNLRINotFoundError(mp.AddressFamilyID, mp.SubAddressFamilyID, "MP_REACH_NLRI")
 }
 
-// UnmarshalMPReachNLRI builds MP Reach NLRI attributes
+// UnmarshalMPReachNLRI builds MP Reach NLRI attributes. addPath, keyed by
+// NLRI type, says which AFI/SAFIs are expected to carry Path IDs; see
+// UnmarshalMPReachNLRIWithState.
 func UnmarshalMPReachNLRI(b []byte, srv6 bool, addPath map[int]bool) (MPNLRI, error) {
+	return UnmarshalMPReachNLRIWithState(b, srv6, addPathState(addPath))
+}
+
+// UnmarshalMPReachNLRIWithState builds MP Reach NLRI attributes whose NLRI
+// are decoded with the state that state, when not nil, returns for their
+// AFI/SAFI; it sets PathIDs and MultiLabel.
+func UnmarshalMPReachNLRIWithState(b []byte, srv6 bool, state NLRIState) (MPNLRI, error) {
 	if glog.V(6) {
-		glog.Infof("MPReachNLRI Raw: %s SRv6 flag: %t add path: %+v", tools.MessageHex(b), srv6, addPath)
+		glog.Infof("MPReachNLRI Raw: %s SRv6 flag: %t", tools.MessageHex(b), srv6)
 	}
 	mp := MPReachNLRI{
-		addPath: addPath,
-		SRv6:    srv6,
+		SRv6: srv6,
 	}
 	p := 0
 	if p+3 > len(b) {
@@ -330,6 +352,9 @@ func UnmarshalMPReachNLRI(b []byte, srv6 bool, addPath map[int]bool) (MPNLRI, er
 	p += 2
 	mp.SubAddressFamilyID = uint8(b[p])
 	p++
+	if state != nil {
+		mp.PathIDs, mp.MultiLabel = state(NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID))
+	}
 	if p+1 > len(b) {
 		return nil, fmt.Errorf("not enough bytes to unmarshal MP_REACH_NLRI: need 1 byte for Next Hop Address Length at offset %d, have %d", p, len(b)-p)
 	}

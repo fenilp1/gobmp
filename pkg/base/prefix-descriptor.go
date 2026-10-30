@@ -30,11 +30,12 @@ func (pd *PrefixDescriptor) GetPrefixMTID() *MultiTopologyIdentifier {
 // GetPrefixIPReachability returns BGP route struct encoded in Prefix Descriptor TLV
 func (pd *PrefixDescriptor) GetPrefixIPReachability(ipv4 bool) *Route {
 	if tlv, ok := pd.PrefixTLV[265]; ok {
-		// Route incoded in PrefixTLV does not carry Path ID, hence passing "false" to UnmarshalRoutes
-		routes, err := UnmarshalRoutes(tlv.Value, false)
+		// The IP Reachability Information TLV carries no Path ID
+		mp, err := UnmarshalRoutesWithState(tlv.Value, PathIDAbsent)
 		if err != nil {
 			return nil
 		}
+		routes := mp.NLRI
 		// Prefix descriptor should carry only a single route, if more than 1 something is wrong
 		// returning nil for that case.
 		if len(routes) != 1 {

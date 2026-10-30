@@ -206,24 +206,72 @@ func TestGetPeerDistinguisherString(t *testing.T) {
 	}
 }
 
-// TestGetTableKey verifies the composite key format.
-func TestGetTableKey(t *testing.T) {
-	pph := &PerPeerHeader{
-		PeerType:          PeerType0,
-		PeerDistinguisher: []byte{0, 0, 0, 0, 0, 0, 0, 0},
-		PeerAddress:       make([]byte, 16),
-		PeerBGPID:         net.ParseIP("10.0.0.1").To4(),
-		PeerTimestamp:     make([]byte, 8),
+// TestSessionKey checks that SessionKey tells monitored sessions apart by
+// peer type, Peer Distinguisher and Peer Address (Loc-RIB: Peer BGP ID), and
+// ignores the fields and flags that do not identify a session (RFC 7854 §4.2,
+// RFC 8671 §6.3, RFC 9069 §6.1.1).
+func TestSessionKey(t *testing.T) {
+	v4 := func() *PerPeerHeader {
+		return &PerPeerHeader{
+			PeerType:          PeerType0,
+			PeerDistinguisher: make([]byte, 8),
+			PeerAddress:       []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 192, 0, 2, 1},
+			PeerAS:            65000,
+			PeerBGPID:         []byte{10, 0, 0, 1},
+			PeerTimestamp:     make([]byte, 8),
+		}
 	}
-	key := pph.GetTableKey()
-	if key == "" {
-		t.Fatal("GetTableKey() returned empty string")
+	v6 := func() *PerPeerHeader {
+		h := v4()
+		h.flagV = true
+		h.PeerAddress = net.ParseIP("2001:db8::1").To16()
+		return h
 	}
-	bgpStr := pph.GetPeerBGPIDString()
-	rdStr := pph.GetPeerDistinguisherString()
-	want := bgpStr + rdStr
-	if key != want {
-		t.Errorf("GetTableKey() = %q, want %q", key, want)
+	locRIB := func() *PerPeerHeader {
+		h := v4()
+		h.PeerType = PeerType3
+		h.PeerAddress = make([]byte, 16)
+		return h
+	}
+	with := func(h *PerPeerHeader, f func(*PerPeerHeader)) *PerPeerHeader {
+		f(h)
+		return h
+	}
+	same := []struct {
+		name string
+		a, b *PerPeerHeader
+	}{
+		{"O flag", v4(), with(v4(), func(h *PerPeerHeader) { h.flagO = true })},
+		{"L flag", v4(), with(v4(), func(h *PerPeerHeader) { h.flagL = true })},
+		{"A flag", v4(), with(v4(), func(h *PerPeerHeader) { h.flagA = true })},
+		{"timestamp", v4(), with(v4(), func(h *PerPeerHeader) { h.PeerTimestamp = []byte{0, 0, 0, 1, 0, 0, 0, 1} })},
+		{"BGP ID", v4(), with(v4(), func(h *PerPeerHeader) { h.PeerBGPID = []byte{10, 0, 0, 2} })},
+		{"peer AS", v4(), with(v4(), func(h *PerPeerHeader) { h.PeerAS = 65001 })},
+		{"Loc-RIB F flag", locRIB(), with(locRIB(), func(h *PerPeerHeader) { h.flagF = true })},
+		{"Loc-RIB peer AS", locRIB(), with(locRIB(), func(h *PerPeerHeader) { h.PeerAS = 65001 })},
+	}
+	for _, tt := range same {
+		if a, b := tt.a.SessionKey(), tt.b.SessionKey(); a != b {
+			t.Errorf("%s: SessionKey() = %q and %q, want equal", tt.name, a, b)
+		}
+	}
+	differ := []struct {
+		name string
+		a, b *PerPeerHeader
+	}{
+		{"IPv4 and IPv6 session to one BGP ID", v4(), v6()},
+		{"IPv4 peer and IPv4-mapped IPv6 peer", v4(), with(v6(), func(h *PerPeerHeader) { h.PeerAddress = net.ParseIP("::ffff:192.0.2.1").To16() })},
+		{"peer address", v4(), with(v4(), func(h *PerPeerHeader) { h.PeerAddress[15] = 2 })},
+		{"peer distinguisher", v4(), with(v4(), func(h *PerPeerHeader) { h.PeerType = PeerType1; h.PeerDistinguisher[7] = 1 })},
+		{"peer type", v4(), with(v4(), func(h *PerPeerHeader) { h.PeerType = PeerType2 })},
+		{"Loc-RIB and global peer", v4(), with(locRIB(), func(h *PerPeerHeader) { h.PeerAddress = v4().PeerAddress })},
+		{"Loc-RIB BGP ID", locRIB(), with(locRIB(), func(h *PerPeerHeader) { h.PeerBGPID = []byte{10, 0, 0, 2} })},
+		{"Loc-RIB distinguisher", locRIB(), with(locRIB(), func(h *PerPeerHeader) { h.PeerDistinguisher[7] = 1 })},
+	}
+	for _, tt := range differ {
+		if a, b := tt.a.SessionKey(), tt.b.SessionKey(); a == b {
+			t.Errorf("%s: SessionKey() = %q for both, want different", tt.name, a)
+		}
 	}
 }
 
@@ -363,5 +411,26 @@ func TestPerPeerHeaderLen(t *testing.T) {
 	want := 1 + 1 + 8 + 16 + 4 + 4 + 8
 	if got != want {
 		t.Errorf("Len() = %d, want %d", got, want)
+	}
+}
+
+// TestGetTableKey verifies the composite key format.
+func TestGetTableKey(t *testing.T) {
+	pph := &PerPeerHeader{
+		PeerType:          PeerType0,
+		PeerDistinguisher: []byte{0, 0, 0, 0, 0, 0, 0, 0},
+		PeerAddress:       make([]byte, 16),
+		PeerBGPID:         net.ParseIP("10.0.0.1").To4(),
+		PeerTimestamp:     make([]byte, 8),
+	}
+	key := pph.GetTableKey()
+	if key == "" {
+		t.Fatal("GetTableKey() returned empty string")
+	}
+	bgpStr := pph.GetPeerBGPIDString()
+	rdStr := pph.GetPeerDistinguisherString()
+	want := bgpStr + rdStr
+	if key != want {
+		t.Errorf("GetTableKey() = %q, want %q", key, want)
 	}
 }

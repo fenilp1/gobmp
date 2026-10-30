@@ -27,12 +27,27 @@ func UnmarshalUnicastNLRI(b []byte, pathID bool) (*base.MPNLRI, error) {
 	return &mpnlri, nil
 }
 
+// UnmarshalUnicastNLRIWithState builds MP NLRI object from the slice of
+// bytes of a SAFI 1 NLRI field, reading Path Identifiers as state s says (see
+// base.UnmarshalRoutesWithState).
+func UnmarshalUnicastNLRIWithState(b []byte, s base.PathIDState) (*base.MPNLRI, error) {
+	if glog.V(6) {
+		glog.Infof("MP Unicast NLRI Raw: %s", tools.MessageHex(b))
+	}
+	if len(b) == 0 {
+		return &base.MPNLRI{NLRI: make([]base.Route, 0)}, nil
+	}
+	return base.UnmarshalRoutesWithState(b, s)
+}
+
 // Options gives the session and attribute context that RFC 8277 labeled
 // unicast NLRI (AFI 1/2, SAFI 4) is decoded in.
 type Options struct {
-	// PathID is set when ADD-PATH is negotiated: a 4-octet Path Identifier
-	// precedes the Length field (RFC 8277 §2.2, §2.3; RFC 7911 §3). A failed
-	// parse is tried once more with it flipped.
+	// PathIDs says whether a 4-octet Path Identifier precedes the Length
+	// field (RFC 8277 §2.2, §2.3; RFC 7911 §3) and whether a failed parse is
+	// tried once more with the setting flipped; see base.DecodeWithPathID.
+	PathIDs base.PathIDState
+	// PathID is the setting tried first while PathIDs is unknown.
 	PathID bool
 	// MultiLabel is the Multiple Labels Capability state; see
 	// base.DecodeLabeledNLRI.
@@ -56,8 +71,7 @@ func UnmarshalLUNLRI(b []byte, pathID bool) (*base.MPNLRI, error) {
 
 // UnmarshalLUNLRIWithOptions builds MP NLRI object from the slice of bytes of
 // an MP_REACH_NLRI or MP_UNREACH_NLRI attribute of AFI 1/2 SAFI 4, decoded per
-// RFC 8277 §2 according to opts. A failed parse is tried once more with the
-// PathID flag flipped.
+// RFC 8277 §2 according to opts.
 func UnmarshalLUNLRIWithOptions(b []byte, opts Options) (*base.MPNLRI, error) {
 	if glog.V(6) {
 		glog.Infof("MP Label Unicast NLRI Raw: %s options: %+v", tools.MessageHex(b), opts)
@@ -66,12 +80,12 @@ func UnmarshalLUNLRIWithOptions(b []byte, opts Options) (*base.MPNLRI, error) {
 	if len(b) == 0 {
 		return &base.MPNLRI{NLRI: make([]base.Route, 0)}, nil
 	}
-	mp, err := parseLabelField(b, opts)
+	mp, err := base.DecodeWithPathID(opts.PathIDs, opts.PathID, func(pathID bool) (*base.MPNLRI, error) {
+		o := opts
+		o.PathID = pathID
+		return parseLabelField(b, o)
+	})
 	if err == nil {
-		return mp, nil
-	}
-	opts.PathID = !opts.PathID
-	if mp, ferr := parseLabelField(b, opts); ferr == nil {
 		return mp, nil
 	}
 	glog.Errorf("failed to reconstruct labeled unicast prefix from slice %s with error: %+v",

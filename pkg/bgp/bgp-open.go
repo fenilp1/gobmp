@@ -48,6 +48,17 @@ func (o *OpenMessage) Is4BytesASCapable() (uint32, bool) {
 // supports Add Path capability
 func (o *OpenMessage) AddPathCapability() map[int]bool {
 	m := make(map[int]bool)
+	for t, sr := range o.AddPathSendReceive() {
+		m[t] = sr == 3
+	}
+	return m
+}
+
+// AddPathSendReceive returns the ADD-PATH capability (code 69) Send/Receive
+// value per NLRI type: 1 receive, 2 send, 3 both (RFC 7911 §4). Tuples with
+// any other value are left out.
+func (o *OpenMessage) AddPathSendReceive() map[int]uint8 {
+	m := make(map[int]uint8)
 	v, ok := o.Capabilities[69]
 	if !ok {
 		return m
@@ -67,10 +78,18 @@ func (o *OpenMessage) AddPathCapability() map[int]bool {
 		for p := 0; p < len(tlv.Value); p += 4 {
 			afi := binary.BigEndian.Uint16(tlv.Value[p : p+2])
 			safi := tlv.Value[p+2]
-			flag := tlv.Value[p+3] == 3
-			m[NLRIMessageType(afi, safi)] = flag
+			sr := tlv.Value[p+3]
+			// RFC 7911 §4: other values SHOULD be treated as not
+			// understood and ignored, as if the AFI/SAFI were not listed.
+			if sr < 1 || sr > 3 {
+				if glog.V(5) {
+					glog.Infof("ignoring AddPath Capability for AFI/SAFI %d/%d with Send/Receive %d", afi, safi, sr)
+				}
+				continue
+			}
+			m[NLRIMessageType(afi, safi)] = sr
 			if glog.V(6) {
-				glog.Infof("AddPath Capability for AFI/SAFI: %d/%d is %t", afi, safi, flag)
+				glog.Infof("AddPath Capability for AFI/SAFI: %d/%d is %d", afi, safi, sr)
 			}
 		}
 	}

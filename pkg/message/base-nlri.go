@@ -16,27 +16,24 @@ import (
 func (p *producer) nlri(op int, ph *bmp.PerPeerHeader, update *bgp.Update) ([]*UnicastPrefix, error) {
 	var operation string
 	var routes []base.Route
-	// Use per-table AddPath capability
-	addPathCap := p.GetAddPathCapability(ph.GetTableKey())
-	pathID := addPathCap[bgp.NLRIMessageType(1, 1)]
+	// The NLRI and Withdrawn Routes fields carry IPv4 unicast routes
+	// (RFC 4760 §1), with the ADD-PATH state of AFI 1 SAFI 1.
+	pathIDs, _ := p.nlriState(ph, bgp.NLRIMessageType(1, 1))
+	field := update.NLRI
 	switch op {
 	case 0:
 		operation = "add"
-		if r, err := base.UnmarshalRoutes(update.NLRI, pathID); err == nil {
-			routes = r
-		} else {
-			return nil, fmt.Errorf("failed to unmarshal routes from NLRI with error: %w", err)
-		}
 	case 1:
 		operation = "del"
-		if r, err := base.UnmarshalRoutes(update.WithdrawnRoutes, pathID); err == nil {
-			routes = r
-		} else {
-			return nil, fmt.Errorf("failed to unmarshal routes from NLRI with error: %w", err)
-		}
+		field = update.WithdrawnRoutes
 	default:
 		return nil, fmt.Errorf("unknown operation %d", op)
 	}
+	mp, err := base.UnmarshalRoutesWithState(field, pathIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal routes from NLRI with error: %w", err)
+	}
+	routes = mp.NLRI
 	prfxs := make([]*UnicastPrefix, 0)
 	// Check if Update carries any routes, if update comes with 0 routes, it is EoR message
 	if len(routes) == 0 {
@@ -73,7 +70,7 @@ func (p *producer) nlri(op int, ph *bmp.PerPeerHeader, update *bgp.Update) ([]*U
 			prfx.IsLocRIBFiltered = f
 		}
 		if prfx.IsLocRIB {
-			prfx.TableName = p.GetTableName(ph.GetPeerBGPIDString(), ph.GetPeerDistinguisherString())
+			prfx.TableName = p.GetTableName(ph)
 		}
 		return []*UnicastPrefix{prfx}, nil
 	}
@@ -126,7 +123,7 @@ func (p *producer) nlri(op int, ph *bmp.PerPeerHeader, update *bgp.Update) ([]*U
 			prfx.IsLocRIBFiltered = f
 		}
 		if prfx.IsLocRIB {
-			prfx.TableName = p.GetTableName(ph.GetPeerBGPIDString(), ph.GetPeerDistinguisherString())
+			prfx.TableName = p.GetTableName(ph)
 		}
 
 		prfxs = append(prfxs, prfx)

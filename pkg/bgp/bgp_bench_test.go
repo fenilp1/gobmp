@@ -50,9 +50,8 @@ var mpReachData = []byte{
 
 func BenchmarkUnmarshalMPReachNLRI(b *testing.B) {
 	b.ReportAllocs()
-	addPath := map[int]bool{}
 	for i := 0; i < b.N; i++ {
-		_, err := UnmarshalMPReachNLRI(mpReachData, false, addPath)
+		_, err := UnmarshalMPReachNLRI(mpReachData, false, map[int]bool{})
 		if err != nil {
 			b.Fatal(err)
 		}

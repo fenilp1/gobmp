@@ -68,23 +68,20 @@ func TestRFC9069_TableNameForLocRIBPeers(t *testing.T) {
 			p := NewProducer(mockPub, false).(*producer)
 
 			// Setup table properties with TableName TLV for LocRIB peers
+			ph := locRIBHeader("10.0.0.1", make([]byte, 8))
 			if tt.peerType == bmp.PeerType3 && tt.tableName != "" {
-				tableKey := "10.0.0.10:0"
-				p.tableLock.Lock()
-				p.tableProperties[tableKey] = PerTableProperties{
-					addPathCapable: make(map[int]bool),
+				p.storeSession(ph, sessionState{
 					tableInfoTLVs: []bmp.InformationalTLV{
 						{
 							InformationType: 3, // Table Name TLV
 							Information:     []byte(tt.tableName),
 						},
 					},
-				}
-				p.tableLock.Unlock()
+				})
 			}
 
 			// Verify GetTableName returns expected value
-			got := p.GetTableName("10.0.0.1", "0:0")
+			got := p.GetTableName(ph)
 			if tt.expectSet && got != tt.tableName {
 				t.Errorf("%s: GetTableName() = %q, want %q", tt.description, got, tt.tableName)
 			}
@@ -219,15 +216,10 @@ func TestRFC9069_InformationalTLVType3(t *testing.T) {
 			mockPub := &mockPublisher{}
 			p := NewProducer(mockPub, false).(*producer)
 
-			tableKey := "10.0.0.10:0"
-			p.tableLock.Lock()
-			p.tableProperties[tableKey] = PerTableProperties{
-				addPathCapable: make(map[int]bool),
-				tableInfoTLVs:  tt.tlvs,
-			}
-			p.tableLock.Unlock()
+			ph := locRIBHeader("10.0.0.1", make([]byte, 8))
+			p.storeSession(ph, sessionState{tableInfoTLVs: tt.tlvs})
 
-			got := p.GetTableName("10.0.0.1", "0:0")
+			got := p.GetTableName(ph)
 			if got != tt.expected {
 				t.Errorf("GetTableName() = %q, want %q", got, tt.expected)
 			}
@@ -247,34 +239,31 @@ func TestRFC9069_MultiVRFTableNames(t *testing.T) {
 	// Setup multiple VRF tables
 	vrfs := []struct {
 		bgpID     string
-		rd        string
+		rd        []byte
 		tableName string
 	}{
-		{"10.0.0.1", "0:0", "default"},
-		{"10.0.0.1", "65000:100", "VRF-CUSTOMER-A"},
-		{"10.0.0.1", "65000:200", "VRF-CUSTOMER-B"},
-		{"192.168.1.1", "65000:100", "VRF-INTERNET"},
+		{"10.0.0.1", make([]byte, 8), "default"},
+		{"10.0.0.1", []byte{0, 0, 0xfd, 0xe8, 0, 0, 0, 100}, "VRF-CUSTOMER-A"}, // 65000:100
+		{"10.0.0.1", []byte{0, 0, 0xfd, 0xe8, 0, 0, 0, 200}, "VRF-CUSTOMER-B"}, // 65000:200
+		{"192.168.1.1", []byte{0, 0, 0xfd, 0xe8, 0, 0, 0, 100}, "VRF-INTERNET"},
 	}
 
 	// Create all VRF table entries
-	p.tableLock.Lock()
 	for _, vrf := range vrfs {
-		tableKey := vrf.bgpID + vrf.rd
-		p.tableProperties[tableKey] = PerTableProperties{
-			addPathCapable: make(map[int]bool),
+		p.storeSession(locRIBHeader(vrf.bgpID, vrf.rd), sessionState{
 			tableInfoTLVs: []bmp.InformationalTLV{
 				{InformationType: 3, Information: []byte(vrf.tableName)},
 			},
-		}
+		})
 	}
-	p.tableLock.Unlock()
 
 	// Verify each VRF returns correct TableName
 	for _, vrf := range vrfs {
 		t.Run(vrf.tableName, func(t *testing.T) {
-			got := p.GetTableName(vrf.bgpID, vrf.rd)
+			ph := locRIBHeader(vrf.bgpID, vrf.rd)
+			got := p.GetTableName(ph)
 			if got != vrf.tableName {
-				t.Errorf("GetTableName(%s, %s) = %q, want %q", vrf.bgpID, vrf.rd, got, vrf.tableName)
+				t.Errorf("GetTableName(%s, %s) = %q, want %q", vrf.bgpID, ph.GetPeerDistinguisherString(), got, vrf.tableName)
 			}
 		})
 	}

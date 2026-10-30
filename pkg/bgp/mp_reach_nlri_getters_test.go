@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/sbezverk/gobmp/pkg/base"
 )
 
 // ---------------------------------------------------------------------------
@@ -217,7 +219,6 @@ func TestMPReachNLRI_NLRINotFound(t *testing.T) {
 		AddressFamilyID:    1,
 		SubAddressFamilyID: 1,
 		NLRI:               []byte{},
-		addPath:            map[int]bool{},
 	}
 
 	notFound := &NLRINotFoundError{}
@@ -289,7 +290,6 @@ func TestMPReachNLRI_NLRINotFound(t *testing.T) {
 			AddressFamilyID:    1, // should be 16388
 			SubAddressFamilyID: 71,
 			NLRI:               []byte{},
-			addPath:            map[int]bool{},
 		}
 		_, err := mp71.GetNLRI71()
 		if !errors.As(err, &notFound) {
@@ -301,7 +301,6 @@ func TestMPReachNLRI_NLRINotFound(t *testing.T) {
 			AddressFamilyID:    16388, // should be 1 or 2
 			SubAddressFamilyID: 73,
 			NLRI:               []byte{},
-			addPath:            map[int]bool{},
 		}
 		_, err := mp73.GetNLRI73()
 		if !errors.As(err, &notFound) {
@@ -347,7 +346,6 @@ func TestMPReachNLRI_GetNLRIRTC(t *testing.T) {
 				AddressFamilyID:    tt.afi,
 				SubAddressFamilyID: tt.safi,
 				NLRI:               tt.nlri,
-				addPath:            map[int]bool{},
 			}
 			route, err := mp.GetNLRIRTC()
 			if tt.wantErr {
@@ -397,7 +395,6 @@ func TestMPReachNLRI_GetNLRIMCASTVPN_WithData(t *testing.T) {
 		AddressFamilyID:    2,
 		SubAddressFamilyID: 5,
 		NLRI:               nlri,
-		addPath:            map[int]bool{},
 	}
 	route, err := mp.GetNLRIMCASTVPN()
 	if err != nil {
@@ -428,7 +425,6 @@ func TestMPReachNLRI_GetNLRIMCASTVPN_AFI2_IPv4Originator(t *testing.T) {
 		AddressFamilyID:    2,
 		SubAddressFamilyID: 5,
 		NLRI:               nlri,
-		addPath:            map[int]bool{},
 	}
 	route, err := mp.GetNLRIMCASTVPN()
 	if err != nil {
@@ -469,7 +465,6 @@ func TestMPReachNLRI_GetNLRIMVPN_Type4(t *testing.T) {
 				AddressFamilyID:    1,
 				SubAddressFamilyID: 129,
 				NLRI:               tt.nlri,
-				addPath:            map[int]bool{},
 			}
 			route, err := mp.GetNLRIMVPN()
 			if err != nil {
@@ -522,7 +517,6 @@ func TestMPReachNLRI_GetFlowspecNLRI_Stubs(t *testing.T) {
 				AddressFamilyID:    tt.afi,
 				SubAddressFamilyID: tt.safi,
 				NLRI:               []byte{},
-				addPath:            map[int]bool{},
 			}
 			_, err := mp.GetFlowspecNLRI()
 			if err == nil {
@@ -554,7 +548,6 @@ func TestMPReachNLRI_GetFlowspecNLRI_VPNWithData(t *testing.T) {
 			0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x01, // RD 100:1
 			0x01, 0x08, 0x0a, // Type1 Dest 10.0.0.0/8
 		},
-		addPath: map[int]bool{},
 	}
 	nlri, err := mp.GetFlowspecNLRI()
 	if err != nil {
@@ -579,7 +572,6 @@ func TestMPReachNLRI_GetFlowspecNLRI_VPNIPv6(t *testing.T) {
 			0x00, 0x00, 0x00, 0xc8, 0x00, 0x00, 0x01, 0x2c, // RD 200:300
 			0x01, 0x20, 0x00, 0x20, 0x01, 0x0d, 0xb8, // Type1 Dest 2001:db8::/32
 		},
-		addPath: map[int]bool{},
 	}
 	nlri, err := mp.GetFlowspecNLRI()
 	if err != nil {
@@ -651,7 +643,6 @@ func TestMPReachNLRI_GetAllFlowspecNLRI(t *testing.T) {
 				AddressFamilyID:    tt.afi,
 				SubAddressFamilyID: tt.safi,
 				NLRI:               tt.nlri,
-				addPath:            map[int]bool{},
 			}
 			nlris, err := mp.GetAllFlowspecNLRI()
 			if tt.wantNotFound {
@@ -693,7 +684,6 @@ func TestMPReachNLRI_GetNLRIUnicast_match(t *testing.T) {
 		AddressFamilyID:    1,
 		SubAddressFamilyID: 1,
 		NLRI:               []byte{0x18, 0x0A, 0x0A, 0x0A},
-		addPath:            map[int]bool{},
 	}
 	nlri, err := mp.GetNLRIUnicast()
 	if err != nil {
@@ -720,7 +710,7 @@ func TestMPReachNLRI_GetNLRI71_NoAddPath(t *testing.T) {
 		AddressFamilyID:    16388,
 		SubAddressFamilyID: 71,
 		NLRI:               nodeNLRI71Payload,
-		addPath:            map[int]bool{71: false},
+		PathIDs:            base.PathIDAbsent,
 	}
 	nlri, err := mp.GetNLRI71()
 	if err != nil {
@@ -741,7 +731,7 @@ func TestMPReachNLRI_GetNLRI71_WithAddPath(t *testing.T) {
 		AddressFamilyID:    16388,
 		SubAddressFamilyID: 71,
 		NLRI:               payload,
-		addPath:            map[int]bool{71: true},
+		PathIDs:            base.PathIDPresent,
 	}
 	nlri, err := mp.GetNLRI71()
 	if err != nil {
@@ -771,7 +761,7 @@ func TestMPReachNLRI_GetNLRI72_NoAddPath(t *testing.T) {
 		AddressFamilyID:    16388,
 		SubAddressFamilyID: 72,
 		NLRI:               payload,
-		addPath:            map[int]bool{72: false},
+		PathIDs:            base.PathIDAbsent,
 	}
 	nlri, err := mp.GetNLRI72()
 	if err != nil {
@@ -795,7 +785,7 @@ func TestMPReachNLRI_GetNLRI72_WithAddPath(t *testing.T) {
 		AddressFamilyID:    16388,
 		SubAddressFamilyID: 72,
 		NLRI:               payload,
-		addPath:            map[int]bool{72: true},
+		PathIDs:            base.PathIDPresent,
 	}
 	nlri, err := mp.GetNLRI72()
 	if err != nil {

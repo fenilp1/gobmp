@@ -157,10 +157,17 @@ func TestLabeledUnicastRFC8277(t *testing.T) {
 		// ADD-PATH on: NLRI without Path IDs are read by the retry.
 		{name: "v4 no Path ID, ADD-PATH on", state: absent, addPath: true, afi: 1, nlri: cat([]byte{0x38, 0x00, 0x06, 0x41}, v4Host), labels: []uint32{100}, prefix: "10.0.0.1", len: 32},
 		{name: "v6 no Path ID, ADD-PATH on", state: absent, addPath: true, afi: 2, nlri: cat([]byte{0x58, 0x00, 0x06, 0x41}, v6Net), labels: []uint32{100}, prefix: "2001:db8:1::", len: 64},
-		// ADD-PATH in one direction only (RFC 7911 §5): read with the Path
-		// ID flag flipped when the first parse fails.
+		// ADD-PATH in one direction only (RFC 7911 §5): this Adj-RIB-In
+		// expects Path IDs only if the peer (received OPEN) advertised Send
+		// and the router (sent OPEN) Receive; a field encoded the other way
+		// is read by the retry.
 		{name: "v4 Path ID, ADD-PATH receive/send", state: absent, apSent: 1, apRecv: 2, afi: 1, nlri: cat(pathID, []byte{0x38, 0x00, 0x06, 0x41}, v4Host), labels: []uint32{100}, prefix: "10.0.0.1", len: 32, pathID: 7},
 		{name: "v4 no Path ID, ADD-PATH send/both", state: absent, apSent: 2, apRecv: 3, afi: 1, nlri: cat([]byte{0x38, 0x00, 0x06, 0x41}, v4Host), labels: []uint32{100}, prefix: "10.0.0.1", len: 32},
+		{name: "v4 no Path ID, ADD-PATH receive/send", state: absent, apSent: 1, apRecv: 2, afi: 1, nlri: cat([]byte{0x38, 0x00, 0x06, 0x41}, v4Host), labels: []uint32{100}, prefix: "10.0.0.1", len: 32},
+		// RFC 7911 §4: a Send/Receive value other than 1-3 is ignored, so
+		// the AFI/SAFI counts as not listed and has no Path IDs.
+		{name: "v4 no Path ID, ADD-PATH value 7", state: absent, apSent: 7, apRecv: 7, afi: 1, nlri: cat([]byte{0x38, 0x00, 0x06, 0x41}, v4Host), labels: []uint32{100}, prefix: "10.0.0.1", len: 32},
+		{name: "v6 no Path ID, ADD-PATH value 4", state: absent, apSent: 4, apRecv: 4, afi: 2, nlri: cat([]byte{0x58, 0x00, 0x06, 0x41}, v6Net), labels: []uint32{100}, prefix: "2001:db8:1::", len: 64},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

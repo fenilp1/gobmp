@@ -61,10 +61,11 @@ func TestProcessNLRI71InterASLink(t *testing.T) {
 	pathNLRI = append(pathNLRI, messageInterASLinkElement()...)
 	wire := []byte{0x40, 0x04, 71, 4, 203, 0, 113, 1, 0}
 	wire = append(wire, pathNLRI...)
-	nlri, err := bgp.UnmarshalMPReachNLRI(wire, false, map[int]bool{71: true})
+	nlri, err := bgp.UnmarshalMPReachNLRI(wire, false, nil)
 	if err != nil {
 		t.Fatalf("UnmarshalMPReachNLRI: %v", err)
 	}
+	nlri.(*bgp.MPReachNLRI).PathIDs = base.PathIDPresent
 	recorder := &recordingPublisher{}
 	p := &producer{publisher: recorder}
 	p.processMPUpdate(nlri, 0, makePeerHeader(t, bmp.PeerType0, 0), &bgp.Update{})
@@ -127,10 +128,11 @@ func TestProcessNLRI71InterASLink(t *testing.T) {
 func TestProcessNLRI71InterASLinkWithdrawalWithAddPath(t *testing.T) {
 	wire := []byte{0x40, 0x04, 71, 0, 0, 0, 88}
 	wire = append(wire, messageInterASLinkElement()...)
-	nlri, err := bgp.UnmarshalMPUnReachNLRI(wire, map[int]bool{71: true})
+	nlri, err := bgp.UnmarshalMPUnReachNLRI(wire, nil)
 	if err != nil {
 		t.Fatalf("UnmarshalMPUnReachNLRI: %v", err)
 	}
+	nlri.(*bgp.MPUnReachNLRI).PathIDs = base.PathIDPresent
 	recorder := &recordingPublisher{}
 	p := &producer{publisher: recorder}
 	p.processMPUpdate(nlri, 1, makePeerHeader(t, bmp.PeerType0, 0), &bgp.Update{})

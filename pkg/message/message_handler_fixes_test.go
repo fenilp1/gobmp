@@ -113,15 +113,11 @@ func TestL3VPN_EoR_LocRIB(t *testing.T) {
 	p := NewProducer(&mockPublisher{}, false).(*producer)
 
 	ph := makePeerHeader(t, bmp.PeerType3, 0x00)
-	tableKey := ph.GetPeerBGPIDString() + ph.GetPeerDistinguisherString()
-	p.tableLock.Lock()
-	p.tableProperties[tableKey] = PerTableProperties{
-		addPathCapable: make(map[int]bool),
+	p.storeSession(ph, sessionState{
 		tableInfoTLVs: []bmp.InformationalTLV{
 			{InformationType: 3, Information: []byte("VRF-L3VPN-EoR")},
 		},
-	}
-	p.tableLock.Unlock()
+	})
 
 	nlri := &mockMPNLRI{
 		l3vpnErr: l3vpn.ErrEmptyNLRI,
@@ -329,7 +325,7 @@ func TestUnicast_ValidNLRI_Publishes(t *testing.T) {
 		0x00,                   // Reserved
 		0x18, 0xc0, 0xa8, 0x01, // /24 prefix: 192.168.1.0/24
 	}
-	nlri, err := bgp.UnmarshalMPReachNLRI(reachBytes, false, map[int]bool{})
+	nlri, err := bgp.UnmarshalMPReachNLRI(reachBytes, false, nil)
 	if err != nil {
 		t.Fatalf("UnmarshalMPReachNLRI: %v", err)
 	}
@@ -361,7 +357,7 @@ func TestEVPN_EoR(t *testing.T) {
 	p := NewProducer(&mockPublisher{}, false).(*producer)
 	// Adj-RIB-In post-policy (L=1)
 	ph := makePeerHeader(t, bmp.PeerType0, 0x40)
-	nlri, err := bgp.UnmarshalMPUnReachNLRI([]byte{0x00, 0x19, 0x46}, map[int]bool{})
+	nlri, err := bgp.UnmarshalMPUnReachNLRI([]byte{0x00, 0x19, 0x46}, nil)
 	if err != nil {
 		t.Fatalf("UnmarshalMPUnReachNLRI: %v", err)
 	}
@@ -392,7 +388,7 @@ func TestEVPN_EoR(t *testing.T) {
 func TestEVPN_EmptyMPReachIsNotEoR(t *testing.T) {
 	p := NewProducer(&mockPublisher{}, false).(*producer)
 	ph := makePeerHeader(t, bmp.PeerType0, 0x40)
-	nlri, err := bgp.UnmarshalMPUnReachNLRI([]byte{0x00, 0x19, 0x46}, map[int]bool{})
+	nlri, err := bgp.UnmarshalMPUnReachNLRI([]byte{0x00, 0x19, 0x46}, nil)
 	if err != nil {
 		t.Fatalf("UnmarshalMPUnReachNLRI: %v", err)
 	}
@@ -412,16 +408,12 @@ func TestEVPN_EoR_LocRIB(t *testing.T) {
 	p := NewProducer(&mockPublisher{}, false).(*producer)
 
 	ph := makePeerHeader(t, bmp.PeerType3, 0x00)
-	tableKey := ph.GetPeerBGPIDString() + ph.GetPeerDistinguisherString()
-	p.tableLock.Lock()
-	p.tableProperties[tableKey] = PerTableProperties{
-		addPathCapable: make(map[int]bool),
+	p.storeSession(ph, sessionState{
 		tableInfoTLVs: []bmp.InformationalTLV{
 			{InformationType: 3, Information: []byte("VRF-EVPN-EoR")},
 		},
-	}
-	p.tableLock.Unlock()
-	nlri, err := bgp.UnmarshalMPUnReachNLRI([]byte{0x00, 0x19, 0x46}, map[int]bool{})
+	})
+	nlri, err := bgp.UnmarshalMPUnReachNLRI([]byte{0x00, 0x19, 0x46}, nil)
 	if err != nil {
 		t.Fatalf("UnmarshalMPUnReachNLRI: %v", err)
 	}

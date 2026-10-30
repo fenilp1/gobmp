@@ -1,236 +1,158 @@
 package message
 
 import (
+	"net"
 	"sync"
 	"testing"
 
+	"github.com/sbezverk/gobmp/pkg/base"
+	"github.com/sbezverk/gobmp/pkg/bgp"
 	"github.com/sbezverk/gobmp/pkg/bmp"
 )
 
-// TestGetTableKey verifies table key generation
-// Per RFC 9069 Section 4: Table key = BGP-ID + Peer Distinguisher
-func TestGetTableKey(t *testing.T) {
-	tests := []struct {
-		name     string
-		peerType bmp.PeerType
-		bgpID    []byte
-		rd       []byte
-		expected string
-	}{
-		{
-			name:     "IPv4 no RD (PeerType0)",
-			peerType: bmp.PeerType0,
-			bgpID:    []byte{10, 0, 0, 1},
-			rd:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
-			expected: "10.0.0.10:0",
-		},
-		{
-			name:     "IPv4 with RD Type 1 (PeerType1)",
-			peerType: bmp.PeerType1,
-			bgpID:    []byte{192, 168, 1, 1},
-			rd:       []byte{0, 1, 192, 168, 1, 1, 0, 100}, // Type 1: IP:ASN
-			expected: "192.168.1.1192.168.1.1:100",
-		},
-		{
-			name:     "LocRIB with RD Type 0 (PeerType3)",
-			peerType: bmp.PeerType3,
-			bgpID:    []byte{10, 0, 0, 1},
-			rd:       []byte{0, 0, 0, 100, 0, 0, 0, 200}, // Type 0: ASN:NN -> 100:200
-			expected: "10.0.0.1100:200",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ph := &bmp.PerPeerHeader{
-				PeerType:          tt.peerType,
-				PeerBGPID:         tt.bgpID,
-				PeerDistinguisher: tt.rd,
-			}
-
-			got := ph.GetTableKey()
-			if got != tt.expected {
-				t.Errorf("GetTableKey() = %v, want %v", got, tt.expected)
-			}
-		})
+// locRIBHeader returns a Loc-RIB Instance Peer header (RFC 9069 §5.1) with
+// the given Peer BGP ID and Peer Distinguisher.
+func locRIBHeader(bgpID string, rd []byte) *bmp.PerPeerHeader {
+	return &bmp.PerPeerHeader{
+		PeerType:          bmp.PeerType3,
+		PeerDistinguisher: rd,
+		PeerAddress:       make([]byte, 16),
+		PeerBGPID:         net.ParseIP(bgpID).To4(),
+		PeerTimestamp:     make([]byte, 8),
 	}
 }
 
-// TestPerTableAddPath verifies AddPath capability is tracked per-table
-// Per RFC 7911 Section 3: AddPath capability is per BGP session
-func TestPerTableAddPath(t *testing.T) {
-	// Create mock publisher
-	mockPub := &mockPublisher{}
-	p := NewProducer(mockPub, false).(*producer)
+// globalHeader returns a Global Instance Peer header (RFC 7854 §4.2) for the
+// peer at addr, an IPv4 or IPv6 address, with BGP ID bgpID.
+func globalHeader(addr, bgpID string) *bmp.PerPeerHeader {
+	return globalHeaderFlags(addr, bgpID, 0)
+}
 
-	// Simulate two different tables with different AddPath capabilities
-	table1Key := "10.0.0.10:0"
-	table2Key := "192.168.1.165000:100"
+// globalHeaderFlags is globalHeader with the Peer Flags flags; the V flag is
+// set for an IPv6 addr.
+func globalHeaderFlags(addr, bgpID string, flags byte) *bmp.PerPeerHeader {
+	b := []byte{byte(bmp.PeerType0), flags}
+	ip := net.ParseIP(addr)
+	if ip.To4() == nil {
+		b[1] |= 0x80 // V flag
+	}
+	b = append(b, make([]byte, 8)...)
+	if v4 := ip.To4(); v4 != nil {
+		b = append(b, make([]byte, 12)...)
+		b = append(b, v4...)
+	} else {
+		b = append(b, ip.To16()...)
+	}
+	b = append(b, 0x00, 0x00, 0xfd, 0xe8) // AS 65000
+	b = append(b, net.ParseIP(bgpID).To4()...)
+	b = append(b, make([]byte, 8)...)
+	ph, err := bmp.UnmarshalPerPeerHeader(b)
+	if err != nil {
+		panic(err)
+	}
+	return attachDefaultTestIdentity(ph)
+}
 
-	// Table 1: has AddPath for IPv4 Unicast (AFI/SAFI 1/1)
-	p.tableLock.Lock()
-	p.tableProperties[table1Key] = PerTableProperties{
-		addPathCapable: map[int]bool{
-			65537: true, // AFI 1, SAFI 1 -> key = 1<<16 + 1 = 65537
-		},
+// TestSessionStateIsolation checks that ADD-PATH and Multiple Labels state
+// is kept per session (RFC 7911 §3, RFC 8277 §2.1).
+func TestSessionStateIsolation(t *testing.T) {
+	p := NewProducer(&mockPublisher{}, false).(*producer)
+	v4uni := bgp.NLRIMessageType(1, 1)
+	evpn := bgp.NLRIMessageType(25, 70)
+	ph1 := globalHeader("192.0.2.1", "10.0.0.1")
+	ph2 := globalHeader("192.0.2.2", "10.0.0.2")
+	p.storeSession(ph1, sessionState{
+		addPathSent: map[int]uint8{v4uni: 3},
+		addPathRecv: map[int]uint8{v4uni: 3},
+		multiLabel:  map[int]bool{v4uni: true},
+	})
+	p.storeSession(ph2, sessionState{
+		addPathSent: map[int]uint8{evpn: 3},
+		addPathRecv: map[int]uint8{evpn: 3},
+	})
+	tests := []struct {
+		ph       *bmp.PerPeerHeader
+		nlriType int
+		wantIDs  base.PathIDState
+		wantML   base.MultiLabel
+	}{
+		{ph1, v4uni, base.PathIDExpectPresent, base.MultiLabelConfirmed},
+		{ph1, evpn, base.PathIDExpectAbsent, base.MultiLabelAbsent},
+		{ph2, v4uni, base.PathIDExpectAbsent, base.MultiLabelAbsent},
+		{ph2, evpn, base.PathIDExpectPresent, base.MultiLabelAbsent},
 	}
-
-	// Table 2: has AddPath for EVPN (AFI/SAFI 25/70)
-	p.tableProperties[table2Key] = PerTableProperties{
-		addPathCapable: map[int]bool{
-			1638470: true, // AFI 25, SAFI 70 -> key = 25<<16 + 70
-		},
-	}
-	p.tableLock.Unlock()
-
-	// Test table 1 capability
-	cap1 := p.GetAddPathCapability(table1Key)
-	if !cap1[65537] {
-		t.Errorf("Table 1 should have AddPath for IPv4 Unicast")
-	}
-	if cap1[1638470] {
-		t.Errorf("Table 1 should NOT have AddPath for EVPN")
-	}
-
-	// Test table 2 capability
-	cap2 := p.GetAddPathCapability(table2Key)
-	if cap2[65537] {
-		t.Errorf("Table 2 should NOT have AddPath for IPv4 Unicast")
-	}
-	if !cap2[1638470] {
-		t.Errorf("Table 2 should have AddPath for EVPN")
-	}
-
-	// Verify tables are independent (can't compare maps directly, so check values)
-	if cap1[65537] == cap2[65537] && cap1[1638470] == cap2[1638470] {
-		// Both tables have same capabilities - would be wrong
-		if cap1[65537] && cap1[1638470] {
-			t.Errorf("Tables should have separate capability maps")
+	for _, tt := range tests {
+		ids, ml := p.nlriState(tt.ph, tt.nlriType)
+		if ids != tt.wantIDs || ml != tt.wantML {
+			t.Errorf("session %s type %d: state %d, %d, want %d, %d", tt.ph.SessionKey(), tt.nlriType, ids, ml, tt.wantIDs, tt.wantML)
 		}
 	}
 }
 
-// TestMissingTable verifies GetAddPathCapability handles missing tables gracefully
-func TestMissingTable(t *testing.T) {
-	mockPub := &mockPublisher{}
-	p := NewProducer(mockPub, false).(*producer)
-
-	// Get capability for non-existent table
-	cap := p.GetAddPathCapability("nonexistent-table")
-
-	// Should return nil (not panic)
-	if cap != nil {
-		t.Errorf("Expected nil for missing table, got %v", cap)
+// TestMissingSession checks that a session with no Peer Up has unknown state.
+func TestMissingSession(t *testing.T) {
+	p := NewProducer(&mockPublisher{}, false).(*producer)
+	ph := globalHeader("192.0.2.1", "10.0.0.1")
+	if ids, ml := p.nlriState(ph, bgp.NLRIMessageType(1, 1)); ids != base.PathIDUnknown || ml != base.MultiLabelUnknown {
+		t.Errorf("state %d, %d, want unknown", ids, ml)
 	}
-
-	// Accessing nil map should return false (Go zero value)
-	if cap[65537] {
-		t.Errorf("Nil map should return false for any key")
+	if tn := p.GetTableName(ph); tn != "" {
+		t.Errorf("GetTableName() = %q, want empty", tn)
 	}
 }
 
-// TestTableLifecycle verifies table properties are created and cleaned up properly
-func TestTableLifecycle(t *testing.T) {
-	mockPub := &mockPublisher{}
-	p := NewProducer(mockPub, false).(*producer)
-
-	tableKey := "10.0.0.10:0"
-
-	// Initially table shouldn't exist
-	cap := p.GetAddPathCapability(tableKey)
-	if cap != nil {
-		t.Errorf("Table should not exist initially")
+// TestSessionLifecycle checks that a Peer Up creates the session state and
+// its Peer Down removes it.
+func TestSessionLifecycle(t *testing.T) {
+	p := NewProducer(&mockPublisher{}, false).(*producer)
+	ph := locRIBHeader("10.0.0.1", make([]byte, 8))
+	p.storeSession(ph, sessionState{
+		addPathSent:   map[int]uint8{65537: 1},
+		addPathRecv:   map[int]uint8{65537: 1},
+		tableInfoTLVs: []bmp.InformationalTLV{{InformationType: 3, Information: []byte("VRF-CUSTOMER-A")}},
+	})
+	if ids, _ := p.nlriState(ph, 65537); ids != base.PathIDExpectPresent {
+		t.Errorf("state after Peer Up %d, want present", ids)
 	}
-
-	// Simulate PeerUp - create table properties
-	p.tableLock.Lock()
-	p.tableProperties[tableKey] = PerTableProperties{
-		addPathCapable: map[int]bool{
-			65537: true,
-		},
-		tableInfoTLVs: []bmp.InformationalTLV{
-			{
-				InformationType: 3, // Table Name
-				Information:     []byte("VRF-CUSTOMER-A"),
-			},
-		},
+	if tn := p.GetTableName(ph); tn != "VRF-CUSTOMER-A" {
+		t.Errorf("GetTableName() = %q, want VRF-CUSTOMER-A", tn)
 	}
-	p.tableLock.Unlock()
-
-	// Verify table exists
-	cap = p.GetAddPathCapability(tableKey)
-	if cap == nil {
-		t.Errorf("Table should exist after PeerUp")
+	p.deleteSession(ph)
+	if ids, _ := p.nlriState(ph, 65537); ids != base.PathIDUnknown {
+		t.Errorf("state after Peer Down %d, want unknown", ids)
 	}
-	if !cap[65537] {
-		t.Errorf("AddPath capability should be set")
-	}
-
-	// Verify table name
-	tableName := p.GetTableName("10.0.0.1", "0:0")
-	if tableName != "VRF-CUSTOMER-A" {
-		t.Errorf("TableName = %v, want VRF-CUSTOMER-A", tableName)
-	}
-
-	// Simulate PeerDown - cleanup
-	p.tableLock.Lock()
-	delete(p.tableProperties, tableKey)
-	p.tableLock.Unlock()
-
-	// Verify table no longer exists
-	cap = p.GetAddPathCapability(tableKey)
-	if cap != nil {
-		t.Errorf("Table should be deleted after PeerDown")
+	if tn := p.GetTableName(ph); tn != "" {
+		t.Errorf("GetTableName() after Peer Down = %q, want empty", tn)
 	}
 }
 
-// TestConcurrentTableAccess verifies thread safety
-func TestConcurrentTableAccess(t *testing.T) {
-	mockPub := &mockPublisher{}
-	p := NewProducer(mockPub, false).(*producer)
-
-	// Number of concurrent goroutines
+// TestConcurrentSessionAccess checks that the session map is safe for
+// concurrent use.
+func TestConcurrentSessionAccess(t *testing.T) {
+	p := NewProducer(&mockPublisher{}, false).(*producer)
 	const numGoroutines = 10
 	const numOperations = 100
-
 	var wg sync.WaitGroup
 	wg.Add(numGoroutines)
-
-	// Launch goroutines that concurrently add/remove/read tables
 	for i := 0; i < numGoroutines; i++ {
 		go func(id int) {
 			defer wg.Done()
-
-			tableKey := "10.0.0." + string(rune('0'+id)) + "0:0"
-
+			ph := globalHeader(net.IPv4(192, 0, 2, byte(id+1)).String(), "10.0.0.1")
 			for j := 0; j < numOperations; j++ {
-				// Add table
-				p.tableLock.Lock()
-				p.tableProperties[tableKey] = PerTableProperties{
-					addPathCapable: map[int]bool{65537: true},
+				p.storeSession(ph, sessionState{
+					addPathSent: map[int]uint8{65537: 3},
+					addPathRecv: map[int]uint8{65537: 3},
+				})
+				if ids, _ := p.nlriState(ph, 65537); ids != base.PathIDExpectPresent {
+					t.Errorf("state %d, want present", ids)
 				}
-				p.tableLock.Unlock()
-
-				// Read table
-				cap := p.GetAddPathCapability(tableKey)
-				if cap == nil {
-					t.Errorf("Table should exist after creation")
-				}
-
-				// Remove table
-				p.tableLock.Lock()
-				delete(p.tableProperties, tableKey)
-				p.tableLock.Unlock()
-
-				// Read table again (should be nil)
-				cap = p.GetAddPathCapability(tableKey)
-				if cap != nil {
-					t.Errorf("Table should be deleted")
+				p.deleteSession(ph)
+				if ids, _ := p.nlriState(ph, 65537); ids != base.PathIDUnknown {
+					t.Errorf("state %d after delete, want unknown", ids)
 				}
 			}
 		}(i)
 	}
-
 	wg.Wait()
 }
 
@@ -242,14 +164,14 @@ func TestGetTableName(t *testing.T) {
 	tests := []struct {
 		name     string
 		bgpID    string
-		rd       string
+		rd       []byte
 		tlvs     []bmp.InformationalTLV
 		expected string
 	}{
 		{
 			name:  "Single table name TLV",
 			bgpID: "10.0.0.1",
-			rd:    "0:0",
+			rd:    make([]byte, 8),
 			tlvs: []bmp.InformationalTLV{
 				{InformationType: 3, Information: []byte("VRF-CUSTOMER-A")},
 			},
@@ -258,7 +180,7 @@ func TestGetTableName(t *testing.T) {
 		{
 			name:  "Multiple TLVs including table name",
 			bgpID: "192.168.1.1",
-			rd:    "65000:100",
+			rd:    []byte{0, 0, 0xfd, 0xe8, 0, 0, 0, 100}, // 65000:100
 			tlvs: []bmp.InformationalTLV{
 				{InformationType: 1, Information: []byte("String TLV")},
 				{InformationType: 3, Information: []byte("VRF-INTERNET")},
@@ -268,8 +190,8 @@ func TestGetTableName(t *testing.T) {
 		},
 		{
 			name:     "No table name TLV",
-			bgpID:    "10.0.0.1",
-			rd:       "0:0",
+			bgpID:    "10.0.0.2",
+			rd:       make([]byte, 8),
 			tlvs:     []bmp.InformationalTLV{},
 			expected: "",
 		},
@@ -277,16 +199,10 @@ func TestGetTableName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tableKey := tt.bgpID + tt.rd
+			ph := locRIBHeader(tt.bgpID, tt.rd)
+			p.storeSession(ph, sessionState{tableInfoTLVs: tt.tlvs})
 
-			p.tableLock.Lock()
-			p.tableProperties[tableKey] = PerTableProperties{
-				addPathCapable: make(map[int]bool),
-				tableInfoTLVs:  tt.tlvs,
-			}
-			p.tableLock.Unlock()
-
-			got := p.GetTableName(tt.bgpID, tt.rd)
+			got := p.GetTableName(ph)
 			if got != tt.expected {
 				t.Errorf("GetTableName() = %v, want %v", got, tt.expected)
 			}

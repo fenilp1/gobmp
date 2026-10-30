@@ -19,7 +19,7 @@ func TestUnicast_RemoteBGPID_EOR(t *testing.T) {
 
 	ph := makePeerHeader(t, bmp.PeerType0, 0x00)
 	reachBytes := []byte{0x00, 0x01, 0x01} // AFI=1 SAFI=1, no prefixes
-	nlri, err := bgp.UnmarshalMPUnReachNLRI(reachBytes, map[int]bool{})
+	nlri, err := bgp.UnmarshalMPUnReachNLRI(reachBytes, nil)
 	if err != nil {
 		t.Fatalf("UnmarshalMPUnReachNLRI: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestUnicast_RemoteBGPID_PerRoute(t *testing.T) {
 		0x00,                   // Reserved
 		0x18, 0xc0, 0xa8, 0x01, // /24 prefix: 192.168.1.0/24
 	}
-	nlri, err := bgp.UnmarshalMPReachNLRI(reachBytes, false, map[int]bool{})
+	nlri, err := bgp.UnmarshalMPReachNLRI(reachBytes, false, nil)
 	if err != nil {
 		t.Fatalf("UnmarshalMPReachNLRI: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestL3VPN_RemoteBGPID_PerRoute(t *testing.T) {
 		0x00, 0x01, 0x01, // Label: 16 (bottom-of-stack)
 		0x00, 0x02, 0x00, 0x00, 0xFD, 0xE8, 0x00, 0x64, // RD: 2:65000:100
 	}
-	nlri, err := bgp.UnmarshalMPReachNLRI(reachBytes, false, map[int]bool{})
+	nlri, err := bgp.UnmarshalMPReachNLRI(reachBytes, false, nil)
 	if err != nil {
 		t.Fatalf("UnmarshalMPReachNLRI: %v", err)
 	}

@@ -56,7 +56,7 @@ func (p *producer) produceRouteMonitorMessage(msg bmp.Message) {
 }
 
 func (p *producer) processMPReach(attribute []byte, ph *bmp.PerPeerHeader, update *bgp.Update) {
-	nlri, err := bgp.UnmarshalMPReachNLRI(attribute, update.HasSRv6Transposition(), p.GetAddPathCapability(ph.GetTableKey()))
+	nlri, err := bgp.UnmarshalMPReachNLRIWithState(attribute, update.HasSRv6Transposition(), p.nlriStateFunc(ph))
 	if err != nil {
 		glog.Errorf("failed to process MP_REACH_NLRI with error: %+v", err)
 		return
@@ -64,7 +64,6 @@ func (p *producer) processMPReach(attribute []byte, ph *bmp.PerPeerHeader, updat
 	reachableUpdate := copyUpdate(update)
 	operation := AddPrefix
 	if reach, ok := nlri.(*bgp.MPReachNLRI); ok {
-		reach.MultiLabel = p.multiLabelState(ph.GetTableKey(), reach.GetAFISAFIType())
 		validateNHC(reachableUpdate, reach.AddressFamilyID, reach.SubAddressFamilyID, reach.NextHopAddress, ph)
 		// RFC 7606 Section 2 treats advertised routes as withdrawn. An empty
 		// MP_REACH advertises none and must not become an End-of-RIB marker.
@@ -116,7 +115,7 @@ func (p *producer) processMPUnreach(attribute []byte, ph *bmp.PerPeerHeader, upd
 	if len(attribute) == 3 && !isEndOfRIB(update) {
 		return
 	}
-	nlri, err := bgp.UnmarshalMPUnReachNLRI(attribute, p.GetAddPathCapability(ph.GetTableKey()), update.HasSRv6Transposition())
+	nlri, err := bgp.UnmarshalMPUnReachNLRIWithState(attribute, update.HasSRv6Transposition(), p.nlriStateFunc(ph))
 	if err != nil {
 		glog.Errorf("failed to process MP_UNREACH_NLRI with error: %+v", err)
 		return
