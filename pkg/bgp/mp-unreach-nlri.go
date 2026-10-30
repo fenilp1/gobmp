@@ -180,7 +180,11 @@ func (mp *MPUnReachNLRI) GetNLRIMulticast() (*base.MPNLRI, error) {
 func (mp *MPUnReachNLRI) GetNLRILU() (*base.MPNLRI, error) {
 	if (mp.AddressFamilyID == 1 || mp.AddressFamilyID == 2) && mp.SubAddressFamilyID == 4 {
 		pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
-		nlri, err := unicast.UnmarshalLUNLRI(mp.WithdrawnRoutes, pathID)
+		nlri, err := unicast.UnmarshalLUNLRIWithOptions(mp.WithdrawnRoutes, unicast.Options{
+			PathID:   pathID,
+			Withdraw: true,
+			AFI:      mp.AddressFamilyID,
+		})
 		if err != nil {
 			return nil, err
 		}

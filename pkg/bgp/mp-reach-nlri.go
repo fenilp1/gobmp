@@ -230,7 +230,11 @@ func (mp *MPReachNLRI) GetNLRIMulticast() (*base.MPNLRI, error) {
 func (mp *MPReachNLRI) GetNLRILU() (*base.MPNLRI, error) {
 	if (mp.AddressFamilyID == 1 || mp.AddressFamilyID == 2) && mp.SubAddressFamilyID == 4 {
 		pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
-		nlri, err := unicast.UnmarshalLUNLRI(mp.NLRI, pathID)
+		nlri, err := unicast.UnmarshalLUNLRIWithOptions(mp.NLRI, unicast.Options{
+			PathID:     pathID,
+			MultiLabel: mp.MultiLabel,
+			AFI:        mp.AddressFamilyID,
+		})
 		if err != nil {
 			return nil, err
 		}

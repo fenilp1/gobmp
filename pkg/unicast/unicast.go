@@ -1,17 +1,13 @@
 package unicast
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
-	"net"
 
 	"github.com/golang/glog"
 	"github.com/sbezverk/gobmp/pkg/base"
 	"github.com/sbezverk/tools"
 )
-
-var compatMarker = []byte{0x80, 0x00, 0x00}
 
 // UnmarshalUnicastNLRI builds MP NLRI object from the slice of bytes
 func UnmarshalUnicastNLRI(b []byte, pathID bool) (*base.MPNLRI, error) {
@@ -31,225 +27,122 @@ func UnmarshalUnicastNLRI(b []byte, pathID bool) (*base.MPNLRI, error) {
 	return &mpnlri, nil
 }
 
-// UnmarshalLUNLRI builds MP NLRI object from the slice of bytes
-// Improvements added,
-// Improved IPv4/IPv6 detection and handling e.g, been parsing msg to kafka topic as 30.223.0.0/64 --> v4
-// IPv4 byte order normalization for malformed addresses
-// Prefix length calculation and validation
-// Enhanced error reporting w position information
-// Empty NLRI proper handling
-// Detailed debug logging for parsed prefixes
-// Aggressive byte order fixing for IPv4 prefixes with wrong lengths
-func UnmarshalLUNLRI(b []byte, pathID bool) (*base.MPNLRI, error) {
-	if glog.V(6) {
-		glog.Infof("MP Label Unicast NLRI Raw: %s path id flag: %t", tools.MessageHex(b), pathID)
-	}
+// Options gives the session and attribute context that RFC 8277 labeled
+// unicast NLRI (AFI 1/2, SAFI 4) is decoded in.
+type Options struct {
+	// PathID is set when ADD-PATH is negotiated: a 4-octet Path Identifier
+	// precedes the Length field (RFC 8277 §2.2, §2.3; RFC 7911 §3). A failed
+	// parse is tried once more with it flipped.
+	PathID bool
+	// MultiLabel is the Multiple Labels Capability state; see
+	// base.DecodeLabeledNLRI.
+	MultiLabel base.MultiLabel
+	// Withdraw selects the MP_UNREACH_NLRI encoding (RFC 8277 §2.4): a 3-octet
+	// Compatibility field, ignored on reception, in place of the labels.
+	Withdraw bool
+	// AFI is the address family, 1 or 2: the prefix may be up to 32 or 128
+	// bits (RFC 8277 §2.2, §2.3). Zero allows up to 128.
+	AFI uint16
+}
 
+// UnmarshalLUNLRI builds MP NLRI object from the slice of bytes of an
+// announced labeled unicast NLRI field. It is UnmarshalLUNLRIWithOptions with
+// the Multiple Labels Capability state unknown and no address family, so an
+// MP_UNREACH_NLRI field, whose Compatibility field is not a label, should be
+// decoded with Options.Withdraw instead.
+func UnmarshalLUNLRI(b []byte, pathID bool) (*base.MPNLRI, error) {
+	return UnmarshalLUNLRIWithOptions(b, Options{PathID: pathID})
+}
+
+// UnmarshalLUNLRIWithOptions builds MP NLRI object from the slice of bytes of
+// an MP_REACH_NLRI or MP_UNREACH_NLRI attribute of AFI 1/2 SAFI 4, decoded per
+// RFC 8277 §2 according to opts. A failed parse is tried once more with the
+// PathID flag flipped.
+func UnmarshalLUNLRIWithOptions(b []byte, opts Options) (*base.MPNLRI, error) {
+	if glog.V(6) {
+		glog.Infof("MP Label Unicast NLRI Raw: %s options: %+v", tools.MessageHex(b), opts)
+	}
 	// Return empty NLRI if no data
 	if len(b) == 0 {
 		return &base.MPNLRI{NLRI: make([]base.Route, 0)}, nil
 	}
-
-	mpnlri := base.MPNLRI{
-		NLRI: make([]base.Route, 0),
+	mp, err := parseLabelField(b, opts)
+	if err == nil {
+		return mp, nil
 	}
-	var err error = nil
+	opts.PathID = !opts.PathID
+	if mp, ferr := parseLabelField(b, opts); ferr == nil {
+		return mp, nil
+	}
+	glog.Errorf("failed to reconstruct labeled unicast prefix from slice %s with error: %+v",
+		tools.MessageHex(b), err)
+	return nil, err
+}
+
+// parseLabelField picks the label field reading: the Compatibility field for
+// withdrawals, else the label stack readings that base.DecodeLabeledNLRI
+// orders by the Multiple Labels Capability state. RFC 9252 transposition does
+// not apply: global IPv4/IPv6 over SRv6 uses SAFI 1 (RFC 9252 §5.3, §5.4).
+func parseLabelField(b []byte, opts Options) (*base.MPNLRI, error) {
+	if opts.Withdraw {
+		return parseLUNLRI(b, opts, base.CompatibilityField)
+	}
+	return base.DecodeLabeledNLRI(opts.MultiLabel, func(f base.LabelField) (*base.MPNLRI, error) {
+		return parseLUNLRI(b, opts, f)
+	})
+}
+
+// parseLUNLRI parses the NLRI field, reading the label field of each NLRI as
+// f says.
+func parseLUNLRI(b []byte, opts Options, f base.LabelField) (*base.MPNLRI, error) {
+	maxPrefixBits := 128
+	if opts.AFI == 1 {
+		maxPrefixBits = 32
+	}
+	mpnlri := base.MPNLRI{NLRI: make([]base.Route, 0)}
 	for p := 0; p < len(b); {
-		up := base.Route{
-			Label: make([]*base.Label, 0),
-		}
-		if pathID {
+		up := base.Route{}
+		if opts.PathID {
 			if p+4 > len(b) {
-				err = fmt.Errorf("not enough bytes to reconstruct labeled unicast prefix")
-				if glog.V(6) {
-					glog.Infof("Error detail: not enough bytes for PathID at position %d (raw data: %s)",
-						p, tools.MessageHex(b))
-				}
-				goto error_handle
+				return nil, fmt.Errorf("not enough bytes for PathID at pos %d", p)
 			}
 			up.PathID = binary.BigEndian.Uint32(b[p : p+4])
 			p += 4
 		}
-		if p+1 > len(b) {
-			err = fmt.Errorf("not enough bytes to reconstruct labeled unicast prefix")
-			if glog.V(6) {
-				glog.Infof("Error detail: not enough bytes for prefix length at position %d", p)
-			}
-			goto error_handle
+		// Length in bits of the label field and prefix
+		if p >= len(b) {
+			return nil, fmt.Errorf("missing NLRI length at pos %d", p)
 		}
-		up.Length = b[p]
-		if up.Length <= 0 {
-			err = fmt.Errorf("not enough bytes to reconstruct l3vpn nlri")
-			if glog.V(6) {
-				glog.Infof("Error detail: invalid prefix length (0 bits) at position %d", p)
-			}
-			goto error_handle
+		length := int(b[p])
+		if length == 0 {
+			return nil, fmt.Errorf("invalid NLRI length (0 bits) at pos %d", p)
 		}
 		p++
 
-		compatibilityField := 0
-		if p+3 > len(b) {
-			err = fmt.Errorf("not enough bytes to reconstruct labeled unicast prefix")
-			if glog.V(6) {
-				glog.Infof("Error detail: not enough bytes for label field at position %d", p)
-			}
-			goto error_handle
+		labels, n, err := base.ReadLabelField(b[p:], f)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse label field at pos %d: %w", p, err)
 		}
+		up.Label = labels
+		p += n
 
-		// checking for compatibility field (special 3-byte value)
-		if bytes.Equal(compatMarker, b[p:p+3]) {
-			up.Label = nil
-			compatibilityField = 3
-			p += 3
-		} else {
-			// else parse labels
-			up.Label = make([]*base.Label, 0)
-			bos := false
-			for !bos && p < len(b) {
-				if p+3 > len(b) {
-					err = fmt.Errorf("not enough bytes to reconstruct label")
-					if glog.V(6) {
-						glog.Infof("Error detail: not enough bytes for label at position %d", p)
-					}
-					goto error_handle
-				}
-				l, e := base.MakeLabel(b[p : p+3])
-				if e != nil {
-					err = e
-					goto error_handle
-				}
-				up.Label = append(up.Label, l)
-				p += 3
-				bos = l.BoS
-			}
+		// A prefix longer than the address family allows makes the NLRI
+		// malformed (RFC 8277 §2.2, §2.3; RFC 7606 §5.3).
+		prefixBits := length - n*8
+		if prefixBits < 0 || prefixBits > maxPrefixBits {
+			return nil, fmt.Errorf("malformed NLRI: prefix length %d bits outside 0-%d (NLRI=%d, label field=%d)",
+				prefixBits, maxPrefixBits, length, n*8)
 		}
-
-		// Calculate remaining bits for the prefix after labels and compatibility field
-		originalLength := up.Length
-		labelBits := (len(up.Label) * 3 * 8)
-		if up.Label == nil {
-			labelBits = compatibilityField * 8
-		}
-
-		// Calculate actual prefix length in bits
-		prefixBitLen := int(originalLength) - labelBits
-
-		// Validate prefix length for IPv4/IPv6
-		if prefixBitLen < 0 {
-			err = fmt.Errorf("invalid negative prefix length %d (total length %d, label bits %d)", prefixBitLen, originalLength, labelBits)
-			goto error_handle
-		}
-		if prefixBitLen > 128 {
-			err = fmt.Errorf("invalid prefix length %d bits exceeds maximum 128 (total length %d, label bits %d)", prefixBitLen, originalLength, labelBits)
-			goto error_handle
-		}
-
-		// Additional check for potentially inverted IPv4 addresses with wrong lengths
-		// This catches cases like 30.223.0.0/64 which should be 223.0.0.30/32
-		if prefixBitLen > 32 && prefixBitLen <= 128 {
-			// Check if this could be an IPv4 with wrong length and byte order
-			if (int(originalLength) - labelBits) <= 128 {
-				// This looks like an IPv4-like address with excessive prefix length
-				if glog.V(6) {
-					glog.Warningf("Potential IPv4 with wrong prefix length: %d bits; will try to normalize", prefixBitLen)
-				}
-			}
-		}
-
-		// Calculate bytes needed for prefix
-		prefixBytes := (prefixBitLen + 7) / 8
-
+		prefixBytes := (prefixBits + 7) / 8
 		if p+prefixBytes > len(b) {
-			err = fmt.Errorf("not enough bytes to reconstruct labeled unicast prefix")
-			if glog.V(6) {
-				glog.Infof("Error detail: not enough bytes for prefix at position %d (need %d more bytes)",
-					p, p+prefixBytes-len(b))
-			}
-			goto error_handle
+			return nil, fmt.Errorf("not enough bytes for prefix at pos %d (need %d)", p, prefixBytes)
 		}
-
-		// Copy the prefix bytes
 		up.Prefix = make([]byte, prefixBytes)
 		copy(up.Prefix, b[p:p+prefixBytes])
-
-		// Aggressive byte order fixing for IPv4 addresses:
-		// 1. If it's already identified as IPv4 (prefixBitLen <= 32)
-		// 2. If it has excessive length but could be IPv4 (prefixBytes <= 4)
-		if prefixBytes <= 4 {
-			// 1. First, always cap excessive IPv4 prefix lengths
-			if prefixBitLen > 32 {
-				if glog.V(6) {
-					glog.Warningf("IPv4-like address with excessive prefix length: %d bits; capping at 32", prefixBitLen)
-				}
-				prefixBitLen = 32
-			}
-
-			// 2. Look for signs of byte order corruption
-			needsFix := false
-
-			// Clear signs of corruption:
-			// - First octet is 0 (not valid for routable prefixes)
-			// - Very high first octet (> 240) that's not a valid IPv4 unicast/multicast
-			if prefixBytes > 0 && (up.Prefix[0] == 0 || up.Prefix[0] > 240) {
-				needsFix = true
-			}
-
-			// 3. Apply fix only when needed
-			if needsFix {
-				ip := net.IP(append(up.Prefix, make([]byte, 4-len(up.Prefix))...)).To4()
-				if ip != nil {
-					if glog.V(6) {
-						glog.Infof("Fixing IPv4 byte order: %v -> %v",
-							net.IP(append(up.Prefix, make([]byte, 4-len(up.Prefix))...)), ip)
-					}
-					// Copy the corrected bytes back
-					copy(up.Prefix, ip[:len(up.Prefix)])
-				}
-			}
-		}
-
 		p += prefixBytes
-
-		// Store the corrected prefix length
-		up.Length = uint8(prefixBitLen)
-
-		// Determine if IPv4 based on corrected length
-		isIPv4 := prefixBitLen <= 32
-
-		// Logging
-		if glog.V(6) {
-			// For IPv4
-			if isIPv4 {
-				padPrefix := make([]byte, 4)
-				copy(padPrefix, up.Prefix)
-				glog.Infof("Parsed IPv4 labeled unicast: %s/%d (labels: %v)",
-					net.IP(padPrefix).String(), prefixBitLen, up.Label)
-			} else {
-				// For IPv6
-				padPrefix := make([]byte, 16)
-				copy(padPrefix, up.Prefix)
-				glog.Infof("Parsed IPv6 labeled unicast: %s/%d (labels: %v)",
-					net.IP(padPrefix).String(), prefixBitLen, up.Label)
-			}
-		}
+		up.Length = uint8(prefixBits)
 
 		mpnlri.NLRI = append(mpnlri.NLRI, up)
-	}
-
-error_handle:
-	// In some cases, Error could be triggered by use of incorrect value of PathID flag
-	// BGP Update might not have PathID set due to some conditions (e.g., different AS)
-	// Here we attempt to Unmarshal again with reversed value of PathID flag
-	if err != nil {
-		if pathID {
-			// Try again with different pathID flag
-			if u, e := UnmarshalLUNLRI(b, !pathID); e == nil {
-				return u, nil
-			}
-		}
-		glog.Errorf("failed to reconstruct labeled unicast prefix from slice %s with error: %+v",
-			tools.MessageHex(b), err)
-		return nil, err
 	}
 
 	return &mpnlri, nil

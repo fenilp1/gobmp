@@ -9,16 +9,22 @@ Message updates and major project changes should be documented here.
 #### Added
 
 - `l3vpn.UnmarshalL3VPNNLRIWithOptions` decodes VPN NLRI per `l3vpn.Options`; `UnmarshalL3VPNNLRI` now wraps it
+- `unicast.UnmarshalLUNLRIWithOptions` decodes labeled unicast NLRI per `unicast.Options`; `UnmarshalLUNLRI` now wraps it
 
 #### Changed
 
 - L3VPN announcements with label field 0x800000 or 0x000000 publish label 524288 or 0 (RFC 8277 §2.2), not none: new hashes
 - L3VPN IPv4 prefixes over 32 bits are dropped as malformed (RFC 8277 §2.2) instead of capped at /32
+- Labeled unicast (SAFI 4) announcements with label 0x800000 publish label 524288 (RFC 8277 §2.2), not none: new hashes
+- Labeled unicast withdrawals skip the Compatibility field whatever its value and publish no labels (RFC 8277 §2.4)
+- Labeled unicast IPv4 prefixes over 32 bits are dropped as malformed (RFC 8277 §2.2)
+- Labeled unicast retries a failed parse with the Path ID flag flipped either way, as L3VPN does
 
 #### Fixed
 
 - L3VPN withdrawals skip the 3-octet Compatibility field whatever its value and publish no labels (RFC 8277 §2.4)
 - L3VPN announcements carry one label, S bit ignored, unless the Multiple Labels Capability is negotiated (RFC 8277 §2.2, §2.3)
+- Labeled unicast announcements carry one label, S bit ignored, unless the Multiple Labels Capability is negotiated (RFC 8277 §2.2)
 - L3VPN labels are read as SRv6 SID bits only under the RFC 9252 §4 Transposition Scheme: Implicit NULL is now 3, not 48
 - L3VPN routes with an SR-MPLS-only Prefix-SID (RFC 8669) publish their MPLS label, e.g. 24001 instead of 384016
 

@@ -190,10 +190,11 @@ func TestUnmarshalUnicastNLRI(t *testing.T) {
 
 func TestUnmarshalLUNLRI(t *testing.T) {
 	tests := []struct {
-		name   string
-		input  []byte
-		expect *base.MPNLRI
-		pathID bool
+		name     string
+		input    []byte
+		expect   *base.MPNLRI
+		pathID   bool
+		withdraw bool
 	}{
 		{
 			name:  "mp unicast nlri 1",
@@ -305,6 +306,7 @@ func TestUnmarshalLUNLRI(t *testing.T) {
 			pathID: true,
 		},
 		{
+			// 0x800000 Compatibility fields: MP_UNREACH_NLRI (RFC 8277 §2.4)
 			name:  "panic case#1",
 			input: []byte{0x00, 0x00, 0x00, 0x01, 0x30, 0x80, 0x00, 0x00, 0x0a, 0x00, 0x67, 0x00, 0x00, 0x00, 0x01, 0x30, 0x80, 0x00, 0x00, 0x0a, 0x00, 0x66, 0x00, 0x00, 0x00, 0x01, 0x30, 0x80, 0x00, 0x00, 0x0a, 0x00, 0x65},
 			expect: &base.MPNLRI{
@@ -329,12 +331,13 @@ func TestUnmarshalLUNLRI(t *testing.T) {
 					},
 				},
 			},
-			pathID: true,
+			pathID:   true,
+			withdraw: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalLUNLRI(tt.input, tt.pathID)
+			got, err := UnmarshalLUNLRIWithOptions(tt.input, Options{PathID: tt.pathID, Withdraw: tt.withdraw})
 			if err != nil {
 				t.Fatalf("test failed with error: %+v", err)
 			}
@@ -386,7 +389,7 @@ func TestUnmarshalLUNLRI_PrefixLengthExceeds128(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for prefix length exceeding 128 bits, got nil")
 	}
-	if !strings.Contains(err.Error(), "exceeds maximum 128") {
+	if !strings.Contains(err.Error(), "outside 0-128") {
 		t.Errorf("expected error about exceeding 128 bits, got: %v", err)
 	}
 }

@@ -162,12 +162,12 @@ func TestRFC8277_LabeledUnicastIPv4(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalLUNLRI(tt.input, tt.pathID)
+			got, err := UnmarshalLUNLRIWithOptions(tt.input, Options{PathID: tt.pathID, AFI: 1})
 			if err != nil {
-				t.Fatalf("UnmarshalLUNLRI() error = %v", err)
+				t.Fatalf("UnmarshalLUNLRIWithOptions() error = %v", err)
 			}
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("UnmarshalLUNLRI() = %+v, want %+v", got, tt.want)
+				t.Errorf("UnmarshalLUNLRIWithOptions() = %+v, want %+v", got, tt.want)
 			}
 		})
 	}
@@ -299,12 +299,12 @@ func TestRFC8277_LabeledUnicastIPv6(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalLUNLRI(tt.input, tt.pathID)
+			got, err := UnmarshalLUNLRIWithOptions(tt.input, Options{PathID: tt.pathID, AFI: 2})
 			if err != nil {
-				t.Fatalf("UnmarshalLUNLRI() error = %v", err)
+				t.Fatalf("UnmarshalLUNLRIWithOptions() error = %v", err)
 			}
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("UnmarshalLUNLRI() = %+v, want %+v", got, tt.want)
+				t.Errorf("UnmarshalLUNLRIWithOptions() = %+v, want %+v", got, tt.want)
 			}
 		})
 	}
@@ -317,6 +317,7 @@ func TestRFC8277_MultiLabelStack(t *testing.T) {
 		name   string
 		input  []byte
 		pathID bool
+		ipv6   bool
 		want   *base.MPNLRI
 	}{
 		{
@@ -398,6 +399,7 @@ func TestRFC8277_MultiLabelStack(t *testing.T) {
 		},
 		{
 			name: "Two label stack with IPv6 prefix (6PE scenario)",
+			ipv6: true,
 			// Length=0x70(112)=48 label bits + 64 prefix bits
 			input: []byte{
 				0x70,             // Length=112
@@ -423,12 +425,12 @@ func TestRFC8277_MultiLabelStack(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalLUNLRI(tt.input, tt.pathID)
+			got, err := UnmarshalLUNLRIWithOptions(tt.input, Options{PathID: tt.pathID, MultiLabel: base.MultiLabelConfirmed, AFI: testAFI(tt.ipv6)})
 			if err != nil {
-				t.Fatalf("UnmarshalLUNLRI() error = %v", err)
+				t.Fatalf("UnmarshalLUNLRIWithOptions() error = %v", err)
 			}
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("UnmarshalLUNLRI() = %+v, want %+v", got, tt.want)
+				t.Errorf("UnmarshalLUNLRIWithOptions() = %+v, want %+v", got, tt.want)
 			}
 		})
 	}
@@ -508,12 +510,12 @@ func TestRFC8277_CompatibilityField(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalLUNLRI(tt.input, tt.pathID)
+			got, err := UnmarshalLUNLRIWithOptions(tt.input, Options{PathID: tt.pathID, Withdraw: true, AFI: 1})
 			if err != nil {
-				t.Fatalf("UnmarshalLUNLRI() error = %v", err)
+				t.Fatalf("UnmarshalLUNLRIWithOptions() error = %v", err)
 			}
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("UnmarshalLUNLRI() = %+v, want %+v", got, tt.want)
+				t.Errorf("UnmarshalLUNLRIWithOptions() = %+v, want %+v", got, tt.want)
 			}
 		})
 	}
@@ -525,6 +527,7 @@ func TestRFC8277_MultipleRoutes(t *testing.T) {
 		name   string
 		input  []byte
 		pathID bool
+		ipv6   bool
 		want   *base.MPNLRI
 	}{
 		{
@@ -608,6 +611,7 @@ func TestRFC8277_MultipleRoutes(t *testing.T) {
 		},
 		{
 			name: "Two IPv6 labeled routes",
+			ipv6: true,
 			input: []byte{
 				// Route 1: 2001:db8:1::/48
 				0x48,             // Length=72=24+48
@@ -642,12 +646,12 @@ func TestRFC8277_MultipleRoutes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalLUNLRI(tt.input, tt.pathID)
+			got, err := UnmarshalLUNLRIWithOptions(tt.input, Options{PathID: tt.pathID, AFI: testAFI(tt.ipv6)})
 			if err != nil {
-				t.Fatalf("UnmarshalLUNLRI() error = %v", err)
+				t.Fatalf("UnmarshalLUNLRIWithOptions() error = %v", err)
 			}
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("UnmarshalLUNLRI() = %+v, want %+v", got, tt.want)
+				t.Errorf("UnmarshalLUNLRIWithOptions() = %+v, want %+v", got, tt.want)
 			}
 		})
 	}
@@ -704,7 +708,7 @@ func TestRFC8277_ErrorCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalLUNLRI(tt.input, tt.pathID)
+			got, err := UnmarshalLUNLRIWithOptions(tt.input, Options{PathID: tt.pathID, AFI: 1})
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("UnmarshalLUNLRI() expected error, got nil (result: %+v)", got)
@@ -714,9 +718,17 @@ func TestRFC8277_ErrorCases(t *testing.T) {
 					t.Fatalf("UnmarshalLUNLRI() unexpected error: %v", err)
 				}
 				if tt.want != nil && !reflect.DeepEqual(got, tt.want) {
-					t.Errorf("UnmarshalLUNLRI() = %+v, want %+v", got, tt.want)
+					t.Errorf("UnmarshalLUNLRIWithOptions() = %+v, want %+v", got, tt.want)
 				}
 			}
 		})
 	}
+}
+
+// testAFI returns the AFI of IPv6 (2) or IPv4 (1) NLRI.
+func testAFI(ipv6 bool) uint16 {
+	if ipv6 {
+		return 2
+	}
+	return 1
 }
