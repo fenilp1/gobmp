@@ -448,7 +448,8 @@ func TestUnmarshalSRPolicyTLV_ENLP(t *testing.T) {
 }
 
 func TestUnmarshalSRPolicyTLV_DuplicateENLP(t *testing.T) {
-	// Duplicate ENLP sub-TLVs - only 1 instance allowed per RFC 9830
+	// Duplicate ENLP sub-TLVs: RFC 9830 Section 2.4 uses only the first
+	// instance; the second MUST be ignored and is not malformed.
 	input := []byte{
 		0x00, 0x0F, // Tunnel Type: 15
 		0x00, 0x0C, // Length: 12 bytes (2 ENLP sub-TLVs)
@@ -466,9 +467,12 @@ func TestUnmarshalSRPolicyTLV_DuplicateENLP(t *testing.T) {
 		0x00, // Reserved
 	}
 
-	_, err := UnmarshalSRPolicyTLV(input)
-	if err == nil {
-		t.Error("UnmarshalSRPolicyTLV() expected error for duplicate ENLP, got nil")
+	tlv, err := UnmarshalSRPolicyTLV(input)
+	if err != nil {
+		t.Fatalf("UnmarshalSRPolicyTLV() error = %v", err)
+	}
+	if tlv.ENLP == nil || tlv.ENLP.ENLP != 1 {
+		t.Errorf("ENLP = %+v, want first instance (ENLP 1)", tlv.ENLP)
 	}
 }
 
@@ -877,5 +881,81 @@ func TestUnmarshalSRPolicyTLV_PolicyNameAndPathName(t *testing.T) {
 	}
 	if !strings.Contains(string(b), `"policy_name_subtlv":"red1"`) || !strings.Contains(string(b), `"path_name_subtlv":"cp1"`) {
 		t.Errorf("JSON = %s", b)
+	}
+}
+
+// TestUnmarshalSRPolicyTLV_SingleInstanceFirstWins: RFC 9830 Section 2.4
+// says that for single-instance sub-TLVs (Preference 12, Binding SID 13, ENLP
+// 14, Priority 15, Candidate Path Name 129, SR Policy Name 130) "only the
+// first instance of that TLV/sub-TLV is used: the other instances MUST be
+// ignored and MUST NOT considered to be malformed".
+func TestUnmarshalSRPolicyTLV_SingleInstanceFirstWins(t *testing.T) {
+	wrapTLV := func(sub ...[]byte) []byte {
+		var v []byte
+		for _, s := range sub {
+			v = append(v, s...)
+		}
+		return append([]byte{0x00, 0x0f, byte(len(v) >> 8), byte(len(v))}, v...)
+	}
+	tests := []struct {
+		name  string
+		input []byte
+		check func(*TLV) bool
+	}{
+		{"Preference", wrapTLV(
+			[]byte{0x0c, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x64},
+			[]byte{0x0c, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc8}),
+			func(t *TLV) bool { return t.Preference != nil && t.Preference.Preference == 100 }},
+		{"Preference duplicate with bad length is ignored", wrapTLV(
+			[]byte{0x0c, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x64},
+			[]byte{0x0c, 0x01, 0x00}),
+			func(t *TLV) bool { return t.Preference != nil && t.Preference.Preference == 100 }},
+		{"Binding SID", wrapTLV(
+			[]byte{0x0d, 0x06, 0x00, 0x00, 0x00, 0x01, 0x90, 0x00}, // label 25
+			[]byte{0x0d, 0x02, 0x00, 0x00}),
+			func(t *TLV) bool { return t.BindingSID != nil && t.BindingSID.Type == LABELBSID }},
+		{"Binding SID duplicate with bad length is ignored", wrapTLV(
+			[]byte{0x0d, 0x02, 0x00, 0x00},
+			[]byte{0x0d, 0x03, 0x00, 0x00, 0x00}),
+			func(t *TLV) bool { return t.BindingSID != nil && t.BindingSID.Type == NOBSID }},
+		{"ENLP duplicate too short is ignored", wrapTLV(
+			[]byte{0x0e, 0x03, 0x00, 0x00, 0x02},
+			[]byte{0x0e, 0x01, 0x00}),
+			func(t *TLV) bool { return t.ENLP != nil && t.ENLP.ENLP == 2 }},
+		{"Priority", wrapTLV(
+			[]byte{0x0f, 0x02, 0x05, 0x00},
+			[]byte{0x0f, 0x02, 0x09, 0x00}),
+			func(t *TLV) bool { return t.Priority == 5 }},
+		{"Priority duplicate empty is ignored", wrapTLV(
+			[]byte{0x0f, 0x02, 0x05, 0x00},
+			[]byte{0x0f, 0x00}),
+			func(t *TLV) bool { return t.Priority == 5 }},
+		{"Candidate Path Name", wrapTLV(
+			[]byte{0x81, 0x00, 0x04, 0x00, 'c', 'p', '1'},
+			[]byte{0x81, 0x00, 0x04, 0x00, 'c', 'p', '2'}),
+			func(t *TLV) bool { return t.PathName == "cp1" }},
+		{"Candidate Path Name first empty still wins", wrapTLV(
+			[]byte{0x81, 0x00, 0x01, 0x00},
+			[]byte{0x81, 0x00, 0x04, 0x00, 'c', 'p', '2'}),
+			func(t *TLV) bool { return t.PathName == "" }},
+		{"SR Policy Name", wrapTLV(
+			[]byte{0x82, 0x00, 0x04, 0x00, 'p', '-', '1'},
+			[]byte{0x82, 0x00, 0x04, 0x00, 'p', '-', '2'}),
+			func(t *TLV) bool { return t.Name == "p-1" }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tlv, err := UnmarshalSRPolicyTLV(tt.input)
+			if err != nil {
+				t.Fatalf("UnmarshalSRPolicyTLV() error = %v", err)
+			}
+			if !tt.check(tlv) {
+				t.Errorf("got %+v, want the first instance", tlv)
+			}
+		})
+	}
+	// A duplicate still has to fit in the attribute: framing errors remain errors.
+	if _, err := UnmarshalSRPolicyTLV(wrapTLV([]byte{0x0c, 0x06, 0, 0, 0, 0, 0, 0x64}, []byte{0x0c, 0x06, 0x00})); err == nil {
+		t.Error("truncated duplicate Preference: want error")
 	}
 }

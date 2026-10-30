@@ -18,6 +18,7 @@ Message updates and major project changes should be documented here.
 #### Fixed
 
 - SR Policy `policy_path_name` (Candidate Path Name sub-TLV 129) no longer starts with the RESERVED octet: RFC 9830 §2.4.7 puts 1 RESERVED octet before the name, so an RFC-encoded name `main` reads `"main"` instead of `"\u0000main"`
+- SR Policy single-instance sub-TLVs follow RFC 9830 §2.4 ("only the first instance ... is used: the other instances MUST be ignored and MUST NOT considered to be malformed"): a repeated Preference (12), Binding SID (13), Priority (15), Candidate Path Name (129) or SR Policy Name (130) no longer overwrites the first one, and a repeated ENLP (14) or segment-list Weight no longer fails the whole SR Policy update (no message was published before)
 
 ### 2026-03-01
 

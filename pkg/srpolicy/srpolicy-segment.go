@@ -184,19 +184,22 @@ func UnmarshalSegmentListSTLV(b []byte) (*SegmentList, error) {
 		p++
 		switch t {
 		case WEIGHTSTLV:
-			if sl.Weight != nil {
-				return nil, fmt.Errorf("Segment List Sub TLV can carry a single instance of Weight")
-			}
 			if p >= len(b) {
 				return nil, fmt.Errorf("truncated Weight STLV: missing length byte")
 			}
 			l := b[p]
 			p++
-			if l != 6 {
-				return nil, fmt.Errorf("invalid length %d of raw data for Weight Sub TLV", l)
-			}
 			if p+int(l) > len(b) {
 				return nil, fmt.Errorf("insufficient data for Weight STLV: need %d bytes, have %d", l, len(b)-p)
+			}
+			// RFC 9830 Section 2.4: only the first Weight is used; later
+			// instances MUST be ignored and are not malformed.
+			if sl.Weight != nil {
+				p += int(l)
+				continue
+			}
+			if l != 6 {
+				return nil, fmt.Errorf("invalid length %d of raw data for Weight Sub TLV", l)
 			}
 			w := &Weight{
 				Flags:  b[p],

@@ -93,6 +93,9 @@ func UnmarshalSRPolicyTLV(b []byte) (*TLV, error) {
 	if int(l)+p != len(b) {
 		return nil, fmt.Errorf("encoded in data length: %d does not match with actual data length %d", int(l)+p, len(b))
 	}
+	// RFC 9830 Section 2.4: for single-instance sub-TLVs only the first
+	// instance is used; later ones MUST be ignored and are not malformed.
+	var seen [256]bool
 	for p < len(b) {
 		st := b[p]
 		sl := 0
@@ -129,6 +132,10 @@ func UnmarshalSRPolicyTLV(b []byte) (*TLV, error) {
 			if p+sl > len(b) {
 				return nil, fmt.Errorf("SR Policy BSID sub-TLV truncated at offset %d: need %d bytes, have %d", p, sl, len(b)-p)
 			}
+			if seen[st] {
+				break
+			}
+			seen[st] = true
 			tlv.BindingSID = &BindingSID{}
 			if tlv.BindingSID.BSID, err = UnmarshalBSIDSTLV(b[p : p+sl]); err != nil {
 				return nil, err
@@ -144,24 +151,29 @@ func UnmarshalSRPolicyTLV(b []byte) (*TLV, error) {
 			if p+sl > len(b) {
 				return nil, fmt.Errorf("SR Policy preference sub-TLV truncated at offset %d: need %d bytes, have %d", p, sl, len(b)-p)
 			}
+			if seen[st] {
+				break
+			}
+			seen[st] = true
 			if tlv.Preference, err = UnmarshalPreferenceSTLV(b[p : p+sl]); err != nil {
 				return nil, err
 			}
 		case ENLPSTLV:
-			if tlv.ENLP != nil {
-				return nil, fmt.Errorf("only 1 instance of ENLP allowed in SR Policy attributes")
-			}
 			glog.Infof("ENLP Sub TLV")
 			if p >= len(b) {
 				return nil, fmt.Errorf("SR Policy sub-TLV %d truncated at offset %d: need 1 byte for length, have %d", st, p, len(b)-p)
 			}
 			sl = int(b[p])
 			p++
-			if sl < 3 {
-				return nil, fmt.Errorf("SR Policy ENLP sub-TLV too short: need at least 3 bytes, have %d", sl)
-			}
 			if p+sl > len(b) {
 				return nil, fmt.Errorf("SR Policy ENLP sub-TLV truncated at offset %d: need %d bytes, have %d", p, sl, len(b)-p)
+			}
+			if seen[st] {
+				break
+			}
+			seen[st] = true
+			if sl < 3 {
+				return nil, fmt.Errorf("SR Policy ENLP sub-TLV too short: need at least 3 bytes, have %d", sl)
 			}
 			tlv.ENLP = &ENLP{
 				Flags: b[p],
@@ -174,11 +186,15 @@ func UnmarshalSRPolicyTLV(b []byte) (*TLV, error) {
 			}
 			sl = int(b[p])
 			p++
-			if sl < 1 {
-				return nil, fmt.Errorf("SR Policy priority sub-TLV too short: need at least 1 byte, have %d", sl)
-			}
 			if p+sl > len(b) {
 				return nil, fmt.Errorf("SR Policy priority sub-TLV truncated at offset %d: need %d bytes, have %d", p, sl, len(b)-p)
+			}
+			if seen[st] {
+				break
+			}
+			seen[st] = true
+			if sl < 1 {
+				return nil, fmt.Errorf("SR Policy priority sub-TLV too short: need at least 1 byte, have %d", sl)
 			}
 			tlv.Priority = b[p]
 		case PATHNAMESTLV:
@@ -192,6 +208,10 @@ func UnmarshalSRPolicyTLV(b []byte) (*TLV, error) {
 			if p+sl > len(b) {
 				return nil, fmt.Errorf("SR Policy pathname sub-TLV truncated at offset %d: need %d bytes, have %d", p, sl, len(b)-p)
 			}
+			if seen[st] {
+				break
+			}
+			seen[st] = true
 			tlv.PathName = symbolicName(b[p : p+sl])
 		case POLICYNAMESTLV:
 			glog.V(5).Infof("Policy Name Sub TLV")
@@ -204,6 +224,10 @@ func UnmarshalSRPolicyTLV(b []byte) (*TLV, error) {
 			if p+sl > len(b) {
 				return nil, fmt.Errorf("SR Policy policy name sub-TLV truncated at offset %d: need %d bytes, have %d", p, sl, len(b)-p)
 			}
+			if seen[st] {
+				break
+			}
+			seen[st] = true
 			tlv.Name = symbolicName(b[p : p+sl])
 		case SRV6STLV:
 			glog.V(5).Infof("SRv6 Binding SID Sub TLV")
