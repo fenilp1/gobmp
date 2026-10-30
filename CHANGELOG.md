@@ -15,6 +15,7 @@ Message updates and major project changes should be documented here.
 #### Fixed
 
 - Publish calls for the messages of one BMP connection are made in the order the messages arrive, so a withdraw is no longer handed to the publisher before its announce, nor a Peer Down before its peer's last routes. This orders the calls, not delivery: Kafka with sarama's defaults can still reorder on a retry, and peer and route messages go to different topics. At most 2×GOMAXPROCS (4 to 16) messages per connection are decoded at once, so a slow publisher holds up the router over TCP instead of growing goroutines without bound, and a panic decoding one message is logged and that message skipped instead of stopping the process. A Route Monitoring or Stats message that arrives before any Peer Up (which RFC 7854 §3.3 does not allow, but a dropped Peer Up causes) is published at once with the TCP source as its router, so a different router_hash, instead of waiting for the first Peer Up and taking its router: that wait leaked goroutines when no Peer Up came and would now stall the connection
+- Closing a BMP connection, and stopping gobmp, publishes every message already read from it before the publisher is stopped, instead of dropping them or publishing to a stopped publisher
 
 ### 2026-03-01
 

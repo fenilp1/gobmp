@@ -39,11 +39,19 @@ func NewParser(queue chan []byte, producerQueue chan bmp.Message, stop chan stru
 	}
 }
 
-// Start begins processing messages from the queue
+// Start begins processing messages from the queue. Once the queue is closed,
+// it closes the producer queue, after the messages of all it has read, and
+// returns. Once stop is closed, it returns without closing the producer queue.
 func (p *parser) Start() {
 	for {
 		select {
-		case msg := <-p.queue:
+		case msg, ok := <-p.queue:
+			if !ok {
+				if p.producerQueue != nil {
+					close(p.producerQueue)
+				}
+				return
+			}
 			// Calling parsingWorker synchronously to avoid Peer State change messages being processed out of order.
 			p.parsingWorker(msg)
 		case <-p.stop:

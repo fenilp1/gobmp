@@ -215,9 +215,13 @@ func (srv *bmpServer) bmpWorker(client net.Conn) {
 	}
 
 	prodStop := make(chan struct{})
+	prodDone := make(chan struct{})
 	producerQueue := make(chan bmp.Message)
 	// Starting messages producer per client with dedicated work queue
-	go prod.Producer(producerQueue, prodStop)
+	go func() {
+		defer close(prodDone)
+		prod.Producer(producerQueue, prodStop)
+	}()
 
 	// Extract speaker IP from the TCP connection. Set on all BMP messages
 	// to provide a consistent router identity regardless of message type.
@@ -259,6 +263,16 @@ func (srv *bmpServer) bmpWorker(client net.Conn) {
 	p := parser.NewParser(parserQueue, producerQueue, parsStop, parserConfig)
 	go p.Start()
 	defer func() {
+		// Close the connection first, so that the router sees it closed
+		// (and in active mode the speaker can be redialled, in passive mode
+		// the connection slot is not held) even while a slow publisher
+		// holds up the drain below.
+		_ = client.Close()
+		// Drain: the parser closes producerQueue once it has passed on all
+		// it read, and the producer returns once it has published all of
+		// it, so Stop() stops the publisher only after the last message.
+		close(parserQueue)
+		<-prodDone
 		glog.V(5).Infof("all done with client %+v", client.RemoteAddr())
 		close(parsStop)
 		close(prodStop)
