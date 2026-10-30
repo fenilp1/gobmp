@@ -90,18 +90,28 @@ func (o *OpenMessage) IsMultiLabelCapable() bool {
 	return false
 }
 
-// BGPRoleCapability returns the BGP Role value and true if the Open message
-// contains exactly one BGP Role capability (code 9, RFC 9234). If the
-// capability is absent or duplicated, it returns 0 and false. Malformed Role
-// capabilities are rejected during capability parsing and cause
-// UnmarshalBGPOpenMessage to fail.
+// BGPRoleCapability returns the BGP Role value (code 9) and true if the Open
+// message carries one, and 0 and false otherwise. RFC 9234 §4.2:
+//
+//	If an eBGP speaker receives multiple but identical BGP Role
+//	Capabilities with the same value in each, then the speaker considers
+//	them to be a single BGP Role Capability and proceeds [RFC5492].  If
+//	multiple BGP Role Capabilities are received and not all of them have
+//	the same value, then the BGP speaker MUST reject the connection using
+//	the Role Mismatch Notification (code 2, subcode 11).
+//
+// A malformed Role (length other than 1, RFC 9234 §4.1) is kept raw by decode
+// and has no value equal to the others, so any malformed instance is a
+// mismatch and no role is reported.
 func (o *OpenMessage) BGPRoleCapability() (BGPRole, bool) {
-	v, ok := o.Capabilities[9]
-	if !ok || len(v) != 1 {
+	v := o.Capabilities[9]
+	if len(v) == 0 {
 		return 0, false
 	}
-	if len(v[0].Value) != 1 {
-		return 0, false
+	for _, c := range v {
+		if len(c.Value) != 1 || c.Value[0] != v[0].Value[0] {
+			return 0, false
+		}
 	}
 
 	return BGPRole(v[0].Value[0]), true

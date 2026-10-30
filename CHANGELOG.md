@@ -6,6 +6,11 @@ Message updates and major project changes should be documented here.
 
 ### 2026-10-30
 
+#### Changed
+
+- Multiprotocol, BGP Role and 4-octet AS capabilities of invalid length are kept raw in `adv_cap`/`recv_cap` with a warning
+- `OpenMessage.BGPRoleCapability` treats identical duplicate Roles as one Role per RFC 9234 Section 4.2
+
 #### Fixed
 
 - Panic on truncated SRv6 Service Data Sub-Sub-TLVs and empty SRv6 L3 Service TLVs per RFC 9252 Section 3.2
@@ -14,6 +19,7 @@ Message updates and major project changes should be documented here.
 - SRv6 sub-TLV length close to 65535 wrapping and stalling the sub-TLV parser
 - Panic on a 4-octet AS capability whose length is not 4; `local_asn` falls back to My AS per RFC 6793 Section 3
 - A panic while parsing or producing one BMP message now drops that message instead of exiting the collector
+- Peer Up dropped when an OPEN carried a Multiprotocol or BGP Role capability of invalid length per RFC 7854 Section 4.10
 
 ### 2026-03-01
 

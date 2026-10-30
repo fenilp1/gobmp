@@ -251,7 +251,7 @@ func TestBGPRoleCapability(t *testing.T) {
 			expectOK:   false,
 		},
 		{
-			name: "duplicate role capability",
+			name: "two different valid roles",
 			openMsgRaw: []byte{
 				0x00, 0x1D, 0x01, 0x04, 0xFD, 0xE8, 0x00, 0x5A, 0x0A, 0x00, 0x00, 0x01,
 				0x10,       // OptParamLen=16
@@ -261,11 +261,25 @@ func TestBGPRoleCapability(t *testing.T) {
 				0x41, 0x04, 0x00, 0x00, 0xFD, 0xE8,
 				0x02, 0x00,
 			},
-			expectRole: BGPRole(0), // ambiguous: two code-9 entries
+			expectRole: BGPRole(0), // RFC 9234 §4.2: Role Mismatch
 			expectOK:   false,
 		},
 		{
-			name: "invalid role capability length 0",
+			name: "two identical valid roles",
+			openMsgRaw: []byte{
+				0x00, 0x2D, 0x01, 0x04, 0xFD, 0xE8, 0x00, 0x5A, 0x0A, 0x00, 0x00, 0x01,
+				0x10,       // OptParamLen=16
+				0x02, 0x0E, // Capabilities param, len=14
+				0x09, 0x01, 0x03, // BGP Role: Customer
+				0x09, 0x01, 0x03, // BGP Role: Customer (identical duplicate)
+				0x41, 0x04, 0x00, 0x00, 0xFD, 0xE8,
+				0x02, 0x00,
+			},
+			expectRole: BGPRoleCustomer, // RFC 9234 §4.2: a single Role
+			expectOK:   true,
+		},
+		{
+			name: "invalid role capability length 0 is kept raw",
 			openMsgRaw: []byte{
 				0x00, 0x19, 0x01, 0x04, 0xFD, 0xE8, 0x00, 0x5A, 0x0A, 0x00, 0x00, 0x01,
 				0x0C,
@@ -274,10 +288,11 @@ func TestBGPRoleCapability(t *testing.T) {
 				0x41, 0x04, 0x00, 0x00, 0xFD, 0xE8,
 				0x02, 0x00,
 			},
-			fail: true,
+			expectRole: BGPRole(0), // malformed Role ignored, OPEN kept
+			expectOK:   false,
 		},
 		{
-			name: "invalid role capability length 2",
+			name: "invalid role capability length 2 is kept raw",
 			openMsgRaw: []byte{
 				0x00, 0x1B, 0x01, 0x04, 0xFD, 0xE8, 0x00, 0x5A, 0x0A, 0x00, 0x00, 0x01,
 				0x0E,
@@ -286,7 +301,22 @@ func TestBGPRoleCapability(t *testing.T) {
 				0x41, 0x04, 0x00, 0x00, 0xFD, 0xE8,
 				0x02, 0x00,
 			},
-			fail: true,
+			expectRole: BGPRole(0), // malformed Role ignored, OPEN kept
+			expectOK:   false,
+		},
+		{
+			name: "malformed role plus valid role",
+			openMsgRaw: []byte{
+				0x00, 0x2E, 0x01, 0x04, 0xFD, 0xE8, 0x00, 0x5A, 0x0A, 0x00, 0x00, 0x01,
+				0x11,
+				0x02, 0x0F,
+				0x09, 0x02, 0x00, 0x00, // BGP Role: code=9, length=2 (invalid)
+				0x09, 0x01, 0x03, // BGP Role: Customer
+				0x41, 0x04, 0x00, 0x00, 0xFD, 0xE8,
+				0x02, 0x00,
+			},
+			expectRole: BGPRole(0), // RFC 9234 §4.2: Roles do not all match
+			expectOK:   false,
 		},
 	}
 	for _, tt := range tests {

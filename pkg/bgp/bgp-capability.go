@@ -38,6 +38,15 @@ var BGPCapabilities = map[uint8]string{
 	185: "Prestandard OPERATIONAL message (deprecated)",
 }
 
+// fixedCapabilityLength lists capability codes whose value has a fixed length:
+// Multiprotocol (RFC 4760 §8), BGP Role (RFC 9234 §4.1) and 4-octet AS
+// (RFC 6793 §3).
+var fixedCapabilityLength = map[uint8]int{
+	1:  4,
+	9:  1,
+	65: 4,
+}
+
 type CapabilityData struct {
 	Value       []byte `json:"capability_value,omitempty"`
 	Description string `json:"capability_descr,omitempty"`
@@ -131,34 +140,29 @@ func UnmarshalBGPCapability(b []byte) (Capability, error) {
 		capData := &CapabilityData{}
 		capData.Value = make([]byte, length)
 		copy(capData.Value, b[p:p+int(length)])
+		p += int(length)
 		d, ok := BGPCapabilities[code]
 		capData.Description = d
 		if !ok {
 			capData.Description = "Unknown capability " + strconv.Itoa(int(code))
 		}
-		if code == 1 {
-			// According RFC https://tools.ietf.org/html/rfc2858#section-7 Length will always be 4 bytes.
-			if length != 4 {
-				return nil, fmt.Errorf("invalid capability length %d for Multiprotocol Extensions, expected 4", length)
+		// The monitored router already accepted this OPEN (RFC 7854 §4.10), so a
+		// malformed capability is kept raw, undecoded, with a warning; rejecting
+		// the OPEN would drop the PeerUp and the per-peer state built from it.
+		// Anything that decodes these values must check the length first.
+		if want, ok := fixedCapabilityLength[code]; ok && int(length) != want {
+			glog.Warningf("capability code %d has invalid length %d at offset %d, expected %d; kept raw", code, length, capStart)
+		} else {
+			switch code {
+			case 1:
+				afi := binary.BigEndian.Uint16(capData.Value[:2])
+				safi := capData.Value[3]
+				capData.Description += getAFISAFIString(afi, safi)
+			case 9:
+				capData.Description += " : " + BGPRole(capData.Value[0]).String()
 			}
-			afi := binary.BigEndian.Uint16(capData.Value[:2])
-			safi := capData.Value[3]
-			capData.Description += getAFISAFIString(afi, safi)
 		}
-		if code == 9 {
-			// RFC 9234: BGP Role capability carries a single-octet Role value.
-			if length != 1 {
-				return nil, fmt.Errorf("invalid BGP Role capability (code 9) length %d at offset %d, expected 1", length, capStart)
-			}
-			capData.Description += " : " + BGPRole(capData.Value[0]).String()
-		}
-		c, ok := caps[code]
-		if !ok {
-			c = make([]*CapabilityData, 0)
-		}
-		c = append(c, capData)
-		caps[code] = c
-		p += int(length)
+		caps[code] = append(caps[code], capData)
 	}
 
 	return caps, nil
