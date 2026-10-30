@@ -44,6 +44,24 @@ func (o *OpenMessage) Is4BytesASCapable() (uint32, bool) {
 	return binary.BigEndian.Uint32(v[0].Value), true
 }
 
+// MultiprotocolFamilies returns the NLRI types the Multiprotocol Extensions
+// capabilities (code 1) list, or IPv4 unicast alone if there is none (RFC
+// 4760 §8). Capabilities whose length is not 4 are ignored.
+func (o *OpenMessage) MultiprotocolFamilies() map[int]bool {
+	v, ok := o.Capabilities[1]
+	if !ok {
+		return map[int]bool{NLRIMessageType(1, 1): true}
+	}
+	m := make(map[int]bool)
+	for _, tlv := range v {
+		if len(tlv.Value) != 4 {
+			continue
+		}
+		m[NLRIMessageType(binary.BigEndian.Uint16(tlv.Value[0:2]), tlv.Value[3])] = true
+	}
+	return m
+}
+
 // AddPathCapability returns a map of NLRI types and bool indicating if a particular NLRI type
 // supports Add Path capability
 func (o *OpenMessage) AddPathCapability() map[int]bool {

@@ -1,6 +1,7 @@
 package message
 
 import (
+	"bytes"
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
@@ -35,6 +36,12 @@ type sessionState struct {
 	// tableInfoTLVs holds the Peer Up Information TLVs, which include the
 	// VRF/Table Name (RFC 9069 §5.2.1).
 	tableInfoTLVs []bmp.InformationalTLV
+	// families holds the NLRI types the Peer Up OPENs list in their
+	// Multiprotocol capabilities (RFC 4760 §8).
+	families map[int]bool
+	// peerUps counts the Peer Ups of a Loc-RIB's emulated peers that no
+	// Peer Down has ended yet (RFC 9069 §6.1.1).
+	peerUps int
 }
 
 // ADD-PATH Send/Receive bits (RFC 7911 §4).
@@ -49,6 +56,10 @@ func newSessionState(peerUp *bmp.PeerUpMessage) sessionState {
 		addPathSent: peerUp.SentOpen.AddPathSendReceive(),
 		addPathRecv: peerUp.ReceivedOpen.AddPathSendReceive(),
 		multiLabel:  make(map[int]bool),
+		families:    peerUp.SentOpen.MultiprotocolFamilies(),
+	}
+	for t := range peerUp.ReceivedOpen.MultiprotocolFamilies() {
+		s.families[t] = true
 	}
 	recv := peerUp.ReceivedOpen.MultiLabelCapability()
 	for t, capable := range peerUp.SentOpen.MultiLabelCapability() {
@@ -62,28 +73,59 @@ func newSessionState(peerUp *bmp.PeerUpMessage) sessionState {
 }
 
 // mergeLocRIB returns the state of a Loc-RIB instance conveyed by more than
-// one emulated peer, each with its own Peer Up for some address families
-// (RFC 9069 §6.1.1): the capabilities of both, and the TLVs of the newer.
+// one emulated peer, each with its own Peer Up whose OPEN lists its address
+// families (RFC 9069 §6.1.1). The new Peer Up s sets the ADD-PATH and
+// Multiple Labels state of the families it lists, so an emulated peer
+// bounced with new capabilities (RFC 9069 §6.1.3) is not left with the old
+// ones; the other families keep the union of both. The Information TLVs of
+// both are kept as an ordered set (RFC 9069 §5.2.1).
 func mergeLocRIB(old, s sessionState) sessionState {
-	union := func(a, b map[int]uint8) map[int]uint8 {
+	addPath := func(a, b map[int]uint8) map[int]uint8 {
 		m := make(map[int]uint8, len(a)+len(b))
 		for t, v := range a {
-			m[t] |= v
+			if !s.families[t] {
+				m[t] = v
+			}
 		}
 		for t, v := range b {
 			m[t] |= v
 		}
 		return m
 	}
-	s.addPathSent = union(old.addPathSent, s.addPathSent)
-	s.addPathRecv = union(old.addPathRecv, s.addPathRecv)
+	s.addPathSent = addPath(old.addPathSent, s.addPathSent)
+	s.addPathRecv = addPath(old.addPathRecv, s.addPathRecv)
 	multiLabel := make(map[int]bool, len(old.multiLabel)+len(s.multiLabel))
-	for _, m := range []map[int]bool{old.multiLabel, s.multiLabel} {
-		for t := range m {
+	for t := range old.multiLabel {
+		if !s.families[t] {
 			multiLabel[t] = true
 		}
 	}
+	for t := range s.multiLabel {
+		multiLabel[t] = true
+	}
 	s.multiLabel = multiLabel
+	families := make(map[int]bool, len(old.families)+len(s.families))
+	for _, m := range []map[int]bool{old.families, s.families} {
+		for t := range m {
+			families[t] = true
+		}
+	}
+	s.families = families
+	tlvs := append([]bmp.InformationalTLV(nil), old.tableInfoTLVs...)
+	for _, tlv := range s.tableInfoTLVs {
+		dup := false
+		for _, o := range tlvs {
+			if o.InformationType == tlv.InformationType && bytes.Equal(o.Information, tlv.Information) {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			tlvs = append(tlvs, tlv)
+		}
+	}
+	s.tableInfoTLVs = tlvs
+	s.peerUps = old.peerUps + s.peerUps
 	return s
 }
 
@@ -334,6 +376,7 @@ func (p *producer) SetConfig(config *Config) error {
 // adding to it (RFC 9069 §6.1.1).
 func (p *producer) storeSession(ph *bmp.PerPeerHeader, s sessionState) {
 	key := ph.SessionKey()
+	s.peerUps = 1
 	p.sessionLock.Lock()
 	defer p.sessionLock.Unlock()
 	if old, ok := p.sessions[key]; ok && ph.PeerType == bmp.PeerType3 {
@@ -343,15 +386,26 @@ func (p *producer) storeSession(ph *bmp.PerPeerHeader, s sessionState) {
 }
 
 // deleteSession removes the state of the session that the Peer Down with
-// header ph ends; for a Loc-RIB, that of all its emulated peers, which share
-// the header.
+// header ph ends. The emulated peers of a Loc-RIB share the header, and a
+// Peer Down carries no OPEN to tell which one it ends (RFC 9069 §5.3,
+// §6.1.1), so a Loc-RIB's state is kept, capabilities of all, until the Peer
+// Down of the last one.
 func (p *producer) deleteSession(ph *bmp.PerPeerHeader) {
 	key := ph.SessionKey()
-	func() {
+	deleted := func() bool {
 		p.sessionLock.Lock()
 		defer p.sessionLock.Unlock()
+		if s, ok := p.sessions[key]; ok && s.peerUps > 1 {
+			s.peerUps--
+			p.sessions[key] = s
+			return false
+		}
 		delete(p.sessions, key)
+		return true
 	}()
+	if !deleted {
+		return
+	}
 	p.pathIDWarnLock.Lock()
 	defer p.pathIDWarnLock.Unlock()
 	for k := range p.pathIDWarned {

@@ -15,6 +15,7 @@ Message updates and major project changes should be documented here.
   the ADD-PATH map and bool forms are kept, and the routes decoders also take the address family
 - `bmp.PerPeerHeader.SessionKey` identifies a monitored session: peer type, distinguisher and address (Loc-RIB: BGP ID)
 - `base.MPNLRI.PathIDsFlipped` reports NLRI read with the Path ID setting opposite to the expected one
+- `bgp.OpenMessage.MultiprotocolFamilies` lists the NLRI types of an OPEN's Multiprotocol capabilities (RFC 4760 §8)
 
 #### Changed
 
@@ -32,6 +33,9 @@ Message updates and major project changes should be documented here.
   (RFC 4271 §4.3, RFC 7606 §5.3) instead of capping IPv4 lengths at 32
 - NLRI decode errors are logged with router, peer, RIB view and AFI/SAFI, and NLRI read with the Path ID setting
   opposite to the negotiated one log a warning, at most once a minute per session and AFI/SAFI
+- A Loc-RIB conveyed by several emulated peers (RFC 9069 §6.1.1) keeps its state until the Peer Down of the last one and
+  the VRF/Table Names of all as an ordered set; each Peer Up sets the ADD-PATH and Multiple Labels state of the families
+  its OPENs list
 
 #### Deprecated
 
