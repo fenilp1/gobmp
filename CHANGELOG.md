@@ -13,6 +13,7 @@ Message updates and major project changes should be documented here.
 - Prefix-SID Label-Index TLV with a length other than 7 misparsing the following TLVs per RFC 8669 Section 3.1
 - SRv6 sub-TLV length close to 65535 wrapping and stalling the sub-TLV parser
 - Panic on a 4-octet AS capability whose length is not 4; `local_asn` falls back to My AS per RFC 6793 Section 3
+- A panic while parsing or producing one BMP message now drops that message instead of exiting the collector
 
 ### 2026-03-01
 

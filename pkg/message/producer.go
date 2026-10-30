@@ -3,7 +3,9 @@ package message
 import (
 	"crypto/md5"
 	"encoding/hex"
+	"runtime/debug"
 	"sync"
+	"sync/atomic"
 
 	"github.com/golang/glog"
 	"github.com/sbezverk/gobmp/pkg/bmp"
@@ -59,6 +61,8 @@ type producer struct {
 	identityLock sync.RWMutex
 	identities   map[string]bmp.PeerIdentity
 	speakerID    bmp.PeerIdentity
+	// panicked is set once a recovered panic has logged its stack trace.
+	panicked atomic.Bool
 }
 
 // Producer publishes one BMP connection's messages in input order.
@@ -116,34 +120,40 @@ func (p *producer) identityFromHeaderFallback(msg bmp.Message) bmp.PeerIdentity 
 	return peer
 }
 
+// producingWorker produces one BMP message. A producer panic costs only that
+// message, not every session in the process.
 func (p *producer) producingWorker(msg bmp.Message) {
+	defer func() {
+		if r := recover(); r != nil {
+			// Only the first stack trace is logged unless V(5), so a peer that
+			// keeps sending the same bad message cannot flood the log.
+			if !p.panicked.Swap(true) || bool(glog.V(5)) {
+				glog.Errorf("panic while producing %T message, dropping it: %v\n%s", msg.Payload, r, debug.Stack())
+			} else {
+				glog.Errorf("panic while producing %T message, dropping it: %v", msg.Payload, r)
+			}
+		}
+	}()
+	p.produce(msg)
+}
+
+func (p *producer) produce(msg bmp.Message) {
 	switch obj := msg.Payload.(type) {
 	case *bmp.PeerUpMessage:
 		var peer bmp.PeerIdentity
-		var peerExists bool
 		if msg.PeerHeader != nil {
 			peerID := msg.PeerHeader.PeerIdentity()
 			peer = bmp.IdentityFromPeerUp(msg)
 			if peerID != "" {
-				p.identityLock.Lock()
-				if p.identities == nil {
-					p.identities = make(map[string]bmp.PeerIdentity)
-				}
-				cachedPeer, ok := p.identities[peerID]
-				peerExists = ok
-				if !peerExists {
-					p.identities[peerID] = peer
+				cachedPeer, peerExists := p.storePeerIdentity(peerID, peer)
+				switch {
+				case !peerExists:
 					glog.V(5).Infof("New peer identity stored for peer %s: %s", peerID, peer)
-				} else if !cachedPeer.IsEqual(peer) {
+				case !cachedPeer.IsEqual(peer):
 					glog.Warningf("Peer identity changed for peer %s: old=%s, new=%s", peerID, cachedPeer, peer)
-					p.identities[peerID] = peer
-				} else {
+				default:
 					glog.V(5).Infof("Duplicate PeerUP message for peer %s: %s", peerID, peer)
 				}
-				if p.speakerID.RouterIP == "" || !isSpecificAddress(p.speakerID.RouterIP) {
-					p.speakerID = peer
-				}
-				p.identityLock.Unlock()
 			}
 		}
 		if m, err := p.producePeerMessage(peerUP, msg, peer); err != nil {
@@ -210,6 +220,38 @@ func (p *producer) producingWorker(msg bmp.Message) {
 	default:
 		glog.Warningf("got Unknown message %T to push to the producer, ignoring it...", obj)
 	}
+}
+
+// storePeerIdentity caches peer under peerID unless an equal identity is
+// already cached, and returns the previously cached identity, if any.
+func (p *producer) storePeerIdentity(peerID string, peer bmp.PeerIdentity) (bmp.PeerIdentity, bool) {
+	p.identityLock.Lock()
+	defer p.identityLock.Unlock()
+	if p.identities == nil {
+		p.identities = make(map[string]bmp.PeerIdentity)
+	}
+	cached, ok := p.identities[peerID]
+	if !ok || !cached.IsEqual(peer) {
+		p.identities[peerID] = peer
+	}
+	if p.speakerID.RouterIP == "" || !isSpecificAddress(p.speakerID.RouterIP) {
+		p.speakerID = peer
+	}
+	return cached, ok
+}
+
+// setTableProperties stores the properties of one table (RFC 9069 §4).
+func (p *producer) setTableProperties(tableKey string, ptp PerTableProperties) {
+	p.tableLock.Lock()
+	defer p.tableLock.Unlock()
+	p.tableProperties[tableKey] = ptp
+}
+
+// deleteTableProperties removes the properties of one table.
+func (p *producer) deleteTableProperties(tableKey string) {
+	p.tableLock.Lock()
+	defer p.tableLock.Unlock()
+	delete(p.tableProperties, tableKey)
 }
 
 // SetConfig configures the producer with the given configuration

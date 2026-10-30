@@ -71,7 +71,7 @@ func (p *producer) producePeerMessage(op int, msg bmp.Message, peerID bmp.PeerId
 		// Create per-table properties for this VRF
 		// Per RFC 9069: Each table identified by BGP-ID + Peer Distinguisher
 		// Per RFC 7911: AddPath capability is per BGP session (not global)
-		p.tableLock.Lock()
+		// Built from untrusted OPEN data before taking tableLock.
 		ptp := PerTableProperties{
 			addPathCapable: make(map[int]bool),
 		}
@@ -93,8 +93,7 @@ func (p *producer) producePeerMessage(op int, msg bmp.Message, peerID bmp.PeerId
 		copy(ptp.tableInfoTLVs, peerUpMsg.Information)
 
 		// Store properties for this table
-		p.tableProperties[msg.PeerHeader.GetTableKey()] = ptp
-		p.tableLock.Unlock()
+		p.setTableProperties(msg.PeerHeader.GetTableKey(), ptp)
 
 		m.AdvCapabilities = peerUpMsg.SentOpen.GetCapabilities()
 		m.RcvCapabilities = peerUpMsg.ReceivedOpen.GetCapabilities()
@@ -127,9 +126,7 @@ func (p *producer) producePeerMessage(op int, msg bmp.Message, peerID bmp.PeerId
 
 		// Clean up table properties when peer goes down
 		// This prevents memory leaks and ensures stale data isn't used
-		p.tableLock.Lock()
-		delete(p.tableProperties, msg.PeerHeader.GetTableKey())
-		p.tableLock.Unlock()
+		p.deleteTableProperties(msg.PeerHeader.GetTableKey())
 	}
 
 	return &m, nil

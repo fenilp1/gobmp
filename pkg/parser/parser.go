@@ -2,6 +2,8 @@ package parser
 
 import (
 	"errors"
+	"runtime/debug"
+	"sync/atomic"
 
 	"github.com/golang/glog"
 	"github.com/sbezverk/gobmp/pkg/bmp"
@@ -23,6 +25,8 @@ type parser struct {
 	producerQueue chan bmp.Message
 	stop          chan struct{}
 	config        *Config
+	// panicked is set once a recovered panic has logged its stack trace.
+	panicked atomic.Bool
 }
 
 // NewParser creates a new parser instance with the given configuration.
@@ -63,7 +67,27 @@ func Parser(queue chan []byte, producerQueue chan bmp.Message, stop chan struct{
 	p.Start()
 }
 
+// parsingWorker parses one BMP message. A decoder panic costs only that
+// message, not every session in the process.
 func (p *parser) parsingWorker(b []byte) {
+	defer func() {
+		if r := recover(); r != nil {
+			// Only the first stack trace is logged unless V(5), so a peer that
+			// keeps sending the same bad message cannot flood the log.
+			if !p.panicked.Swap(true) || bool(glog.V(5)) {
+				glog.Errorf("panic while parsing BMP message (%d bytes), dropping it: %v\n%s", len(b), r, debug.Stack())
+			} else {
+				glog.Errorf("panic while parsing BMP message (%d bytes), dropping it: %v", len(b), r)
+			}
+			if glog.V(5) {
+				glog.Infof("message content: %s", tools.MessageHex(b))
+			}
+		}
+	}()
+	p.parse(b)
+}
+
+func (p *parser) parse(b []byte) {
 	// If raw mode is enabled, send the entire message as-is
 	if p.config.EnableRawMode {
 		p.sendRawMessage(b)
