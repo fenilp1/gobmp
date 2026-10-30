@@ -483,3 +483,52 @@ func TestFlowspec_RouterHash_RoundTrip(t *testing.T) {
 		t.Errorf("RouterIP = %q, want %q", got.RouterIP, "10.0.0.1")
 	}
 }
+
+// TestFlowspecProducer_ZeroLengthNextHop: RFC 8955 §4 says "the Length of the
+// Next-Hop Network Address MUST be set to 0" (RFC 8956 §2 reuses SAFI 133 for IPv6).
+// Such a route has no next hop, so the published message must omit "nexthop".
+func TestFlowspecProducer_ZeroLengthNextHop(t *testing.T) {
+	tests := []struct {
+		name string
+		wire []byte
+	}{
+		// AFI 1, SAFI 133, NH len 0, Reserved, NLRI len 3: dst 10.0.0.0/8
+		{"IPv4", []byte{0x00, 0x01, 0x85, 0x00, 0x00, 0x03, 0x01, 0x08, 0x0a}},
+		// AFI 2, SAFI 133, NH len 0, Reserved, NLRI len 5: dst 2001::/16 offset 0
+		{"IPv6", []byte{0x00, 0x02, 0x85, 0x00, 0x00, 0x05, 0x01, 0x10, 0x00, 0x20, 0x01}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mp, err := bgp.UnmarshalMPReachNLRI(tt.wire, false, map[int]bool{})
+			if err != nil {
+				t.Fatalf("UnmarshalMPReachNLRI: %v", err)
+			}
+			p := &producer{}
+			msgs, err := p.flowspec(mp, 0, minimalPeerHeader(), minimalUpdate())
+			if err != nil {
+				t.Fatalf("flowspec: %v", err)
+			}
+			if len(msgs) != 1 {
+				t.Fatalf("expected 1 message, got %d", len(msgs))
+			}
+			if msgs[0].Nexthop != "" {
+				t.Errorf("Nexthop = %q, want empty", msgs[0].Nexthop)
+			}
+			b, err := json.Marshal(msgs[0])
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			var m map[string]json.RawMessage
+			if err := json.Unmarshal(b, &m); err != nil {
+				t.Fatalf("Unmarshal map: %v", err)
+			}
+			if nh, ok := m["nexthop"]; ok {
+				t.Errorf("nexthop present in JSON: %s", nh)
+			}
+			var back Flowspec
+			if err := json.Unmarshal(b, &back); err != nil {
+				t.Fatalf("Flowspec.UnmarshalJSON without nexthop: %v", err)
+			}
+		})
+	}
+}

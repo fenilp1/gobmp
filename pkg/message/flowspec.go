@@ -124,8 +124,11 @@ func (fs *Flowspec) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(objmap["is_nexthop_ipv4"], &o.IsNexthopIPv4); err != nil {
 		return err
 	}
-	if err := json.Unmarshal(objmap["nexthop"], &o.Nexthop); err != nil {
-		return err
+	// nexthop is omitted when the MP_REACH next hop length is 0 (RFC 8955 §4)
+	if nh, ok := objmap["nexthop"]; ok {
+		if err := json.Unmarshal(nh, &o.Nexthop); err != nil {
+			return err
+		}
 	}
 	if err := json.Unmarshal(objmap["peer_asn"], &o.PeerASN); err != nil {
 		return err

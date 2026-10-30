@@ -65,8 +65,12 @@ func (mp *MPReachNLRI) IsNextHopIPv6() bool {
 }
 
 // GetNextHop return a string representation of the next hop ip address.
+// A zero-length next hop carries no address and yields "" (RFC 8955 §4:
+// Flow Specification sets the Length of Next Hop Network Address to 0).
 func (mp *MPReachNLRI) GetNextHop() string {
 	switch mp.NextHopAddressLength {
+	case 0:
+		return ""
 	case 4:
 		// IPv4
 		return net.IP(mp.NextHopAddress).To4().String()

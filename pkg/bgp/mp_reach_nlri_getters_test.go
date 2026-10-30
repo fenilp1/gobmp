@@ -207,6 +207,16 @@ func TestMPReachNLRI_GetNextHop(t *testing.T) {
 	}
 }
 
+// TestMPReachNLRI_GetNextHop_ZeroLength: RFC 8955 §4 requires the Length of
+// Next Hop Network Address to be 0 for Flow Specification; a zero-length next
+// hop has no address and must yield "" rather than an error string.
+func TestMPReachNLRI_GetNextHop_ZeroLength(t *testing.T) {
+	mp := &MPReachNLRI{AddressFamilyID: 1, SubAddressFamilyID: 133}
+	if got := mp.GetNextHop(); got != "" {
+		t.Errorf("GetNextHop() = %q, want empty string", got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // MPReachNLRI getter not-found paths
 // ---------------------------------------------------------------------------
