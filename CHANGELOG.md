@@ -13,6 +13,8 @@ Message updates and major project changes should be documented here.
   pre-create topics must add them
 - Transport Class Route Target extended communities (RFC 9832 §4.3) render as `transport-target=` and
   `nt-transport-target=`, and BGP CT routes publish their Transport Class IDs as `transport_class_ids`
+- RTC (SAFI 132) NLRI whose Route Target is a Transport Class RT (type 0x0a or 0x4a, RFC 9832 §4.3) are accepted, not
+  rejected, and publish it as `transport-target:<reserved>:<id>` or `nt-transport-target:<reserved>:<id>`
 - `l3vpn.UnmarshalL3VPNNLRIWithOptions` decodes VPN NLRI per `l3vpn.Options`; `UnmarshalL3VPNNLRI` now wraps it
 - `unicast.UnmarshalLUNLRIWithOptions` decodes labeled unicast NLRI per `unicast.Options`; `UnmarshalLUNLRI` now wraps it
 - `base.PathIDState` and state-based decoders `bgp.UnmarshalMPReachNLRIWithState`, `bgp.UnmarshalMPUnReachNLRIWithState`,

@@ -102,7 +102,8 @@ func UnmarshalRTCNLRI(b []byte) (*Route, error) {
 }
 
 // validateRouteTarget validates an 8-byte Route Target Extended Community
-// Route Target must be Type 0x00, 0x01, or 0x02 with SubType 0x02
+// Route Target must be Type 0x00, 0x01, 0x02, or the Transport Class type
+// 0x0a (RFC 9832 §4.3) with SubType 0x02
 func validateRouteTarget(b []byte) error {
 	if len(b) != 8 {
 		return fmt.Errorf("invalid Route Target length: expected 8 bytes, got %d", len(b))
@@ -111,10 +112,11 @@ func validateRouteTarget(b []byte) error {
 	extType := b[0]
 	extSubType := b[1]
 
-	// Validate type (must be transitive 2-byte AS, IPv4, or 4-byte AS)
+	// Validate type (must be 2-byte AS, IPv4, 4-byte AS, or Transport Class).
+	// RFC 9832 §4.3 applies RTC to the Transport Class RT of BGP CT routes.
 	typeBase := extType & 0x3f
-	if typeBase != 0x00 && typeBase != 0x01 && typeBase != 0x02 {
-		return fmt.Errorf("unsupported Route Target type 0x%02x (expected 0x00, 0x01, or 0x02)", extType)
+	if typeBase != 0x00 && typeBase != 0x01 && typeBase != 0x02 && typeBase != 0x0a {
+		return fmt.Errorf("unsupported Route Target type 0x%02x (expected 0x00, 0x01, 0x02, or 0x0a)", extType)
 	}
 
 	// Validate SubType (must be 0x02 for Route Target per RFC 4360)
@@ -149,6 +151,14 @@ func (n *NLRI) String() string {
 			as := binary.BigEndian.Uint32(n.RouteTarget[2:6])
 			val := binary.BigEndian.Uint16(n.RouteTarget[6:8])
 			return fmt.Sprintf("RTC{AS=%d, RT=%d:%d}", n.OriginAS, as, val)
+		case 0x0a: // Transport Class (0x0a, or 0x4a non-transitive): 2-octet Reserved, 4-octet TC ID (RFC 9832 §4.3)
+			reserved := binary.BigEndian.Uint16(n.RouteTarget[2:4])
+			id := binary.BigEndian.Uint32(n.RouteTarget[4:8])
+			name := "transport-target"
+			if n.RouteTarget[0]&0x40 != 0 { // 0x4a, non-transitive
+				name = "nt-transport-target"
+			}
+			return fmt.Sprintf("RTC{AS=%d, RT=%s:%d:%d}", n.OriginAS, name, reserved, id)
 		default:
 			return fmt.Sprintf("RTC{AS=%d, RT=0x%x}", n.OriginAS, n.RouteTarget)
 		}
