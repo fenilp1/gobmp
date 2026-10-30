@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/golang/glog"
+	"github.com/sbezverk/gobmp/pkg/base"
 	"github.com/sbezverk/gobmp/pkg/bmp"
 	"github.com/sbezverk/gobmp/pkg/pub"
 )
@@ -21,7 +22,10 @@ const (
 // - Table Informational TLVs (including Table Name per RFC 9069)
 type PerTableProperties struct {
 	addPathCapable map[int]bool
-	tableInfoTLVs  []bmp.InformationalTLV
+	// multiLabelCapable holds the NLRI types for which the Multiple Labels
+	// Capability was both sent and received (RFC 8277 §2.3)
+	multiLabelCapable map[int]bool
+	tableInfoTLVs     []bmp.InformationalTLV
 }
 
 // Config holds producer configuration options
@@ -245,6 +249,29 @@ func (p *producer) GetAddPathCapability(tableKey string) map[int]bool {
 	// Return nil - parsers will treat nil map as "no AddPath capability"
 	// This is safe: accessing nil map returns zero value (false)
 	return nil
+}
+
+// GetMultiLabelCapability returns the Multiple Labels capability map for a
+// specific table, nil if the table doesn't exist (RFC 8277 §2.3).
+func (p *producer) GetMultiLabelCapability(tableKey string) map[int]bool {
+	p.tableLock.RLock()
+	defer p.tableLock.RUnlock()
+
+	return p.tableProperties[tableKey].multiLabelCapable
+}
+
+// multiLabelState returns the Multiple Labels Capability state of NLRI type
+// nlriType in a table: unknown if no Peer Up was seen for the table.
+func (p *producer) multiLabelState(tableKey string, nlriType int) base.MultiLabel {
+	caps := p.GetMultiLabelCapability(tableKey)
+	switch {
+	case caps == nil:
+		return base.MultiLabelUnknown
+	case caps[nlriType]:
+		return base.MultiLabelConfirmed
+	default:
+		return base.MultiLabelAbsent
+	}
 }
 
 // GetTableName returns table name from Table Informational TLVs

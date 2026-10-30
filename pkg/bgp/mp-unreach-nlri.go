@@ -108,7 +108,11 @@ func (mp *MPUnReachNLRI) GetNLRI73() (*srpolicy.NLRI73, error) {
 func (mp *MPUnReachNLRI) GetNLRIL3VPN() (*base.MPNLRI, error) {
 	if (mp.AddressFamilyID == 1 || mp.AddressFamilyID == 2) && mp.SubAddressFamilyID == 128 {
 		pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
-		nlri, err := l3vpn.UnmarshalL3VPNNLRI(mp.WithdrawnRoutes, pathID, mp.SRv6)
+		nlri, err := l3vpn.UnmarshalL3VPNNLRIWithOptions(mp.WithdrawnRoutes, l3vpn.Options{
+			PathID:   pathID,
+			Withdraw: true,
+			AFI:      mp.AddressFamilyID,
+		})
 		if err != nil {
 			return nil, err
 		}

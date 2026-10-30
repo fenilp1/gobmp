@@ -104,7 +104,7 @@ func TestRFC4364_RouteDistinguisher_Type0(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalL3VPNNLRI(tt.input, false)
+			got, err := UnmarshalL3VPNNLRIWithOptions(tt.input, Options{AFI: 1})
 			if err != nil {
 				t.Fatalf("UnmarshalL3VPNNLRI failed: %v", err)
 			}
@@ -186,7 +186,7 @@ func TestRFC4364_RouteDistinguisher_Type1(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalL3VPNNLRI(tt.input, false)
+			got, err := UnmarshalL3VPNNLRIWithOptions(tt.input, Options{AFI: 1})
 			if err != nil {
 				t.Fatalf("UnmarshalL3VPNNLRI failed: %v", err)
 			}
@@ -237,7 +237,7 @@ func TestRFC4364_RouteDistinguisher_Type2(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalL3VPNNLRI(tt.input, false)
+			got, err := UnmarshalL3VPNNLRIWithOptions(tt.input, Options{AFI: 1})
 			if err != nil {
 				t.Fatalf("UnmarshalL3VPNNLRI failed: %v", err)
 			}
@@ -344,7 +344,7 @@ func TestRFC4364_VPNv4_VariousPrefixLengths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalL3VPNNLRI(tt.input, false)
+			got, err := UnmarshalL3VPNNLRIWithOptions(tt.input, Options{AFI: 1})
 			if err != nil {
 				t.Fatalf("UnmarshalL3VPNNLRI failed: %v", err)
 			}
@@ -378,7 +378,7 @@ func TestRFC4364_VPNv4_MultipleNLRIs(t *testing.T) {
 		0x64, 0x64, 0x07, // Prefix 100.100.7.0/24
 	}
 
-	got, err := UnmarshalL3VPNNLRI(input, false)
+	got, err := UnmarshalL3VPNNLRIWithOptions(input, Options{AFI: 1})
 	if err != nil {
 		t.Fatalf("UnmarshalL3VPNNLRI failed: %v", err)
 	}
@@ -474,7 +474,7 @@ func TestRFC4364_VPNv6_Prefixes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalL3VPNNLRI(tt.input, false)
+			got, err := UnmarshalL3VPNNLRIWithOptions(tt.input, Options{AFI: 2})
 			if err != nil {
 				t.Fatalf("UnmarshalL3VPNNLRI failed: %v", err)
 			}
@@ -529,7 +529,7 @@ func TestRFC4364_WithPathID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalL3VPNNLRI(tt.input, true) // pathID = true
+			got, err := UnmarshalL3VPNNLRIWithOptions(tt.input, Options{PathID: true, AFI: 1})
 			if err != nil {
 				t.Fatalf("UnmarshalL3VPNNLRI failed: %v", err)
 			}
@@ -551,6 +551,7 @@ func TestRFC4364_MPLSLabels(t *testing.T) {
 		input         []byte
 		expectedLabel uint32
 		expectedBoS   bool
+		afi           uint16
 	}{
 		{
 			// Standard VPN label
@@ -577,6 +578,7 @@ func TestRFC4364_MPLSLabels(t *testing.T) {
 			},
 			expectedLabel: 101007,
 			expectedBoS:   true,
+			afi:           2,
 		},
 		{
 			// Minimum label value (label 0 is reserved but valid for parsing)
@@ -595,7 +597,11 @@ func TestRFC4364_MPLSLabels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalL3VPNNLRI(tt.input, false)
+			afi := tt.afi
+			if afi == 0 {
+				afi = 1
+			}
+			got, err := UnmarshalL3VPNNLRIWithOptions(tt.input, Options{AFI: afi})
 			if err != nil {
 				t.Fatalf("UnmarshalL3VPNNLRI failed: %v", err)
 			}
@@ -627,7 +633,7 @@ func TestRFC4364_SRv6_L3VPN(t *testing.T) {
 		0x18, 0x18, 0x18, 0x00, // Prefix 24.24.24.0/30
 	}
 
-	got, err := UnmarshalL3VPNNLRI(input, false, true) // srv6 = true
+	got, err := UnmarshalL3VPNNLRIWithOptions(input, Options{SRv6: true, AFI: 1})
 	if err != nil {
 		t.Fatalf("UnmarshalL3VPNNLRI failed: %v", err)
 	}
@@ -675,7 +681,7 @@ func TestRFC4364_ErrorCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := UnmarshalL3VPNNLRI(tt.input, false)
+			_, err := UnmarshalL3VPNNLRIWithOptions(tt.input, Options{AFI: 1})
 			if err == nil {
 				t.Error("Expected error but got none")
 			}
@@ -719,13 +725,13 @@ func TestRFC4364_Withdrawals(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := UnmarshalL3VPNNLRI(tt.input, false)
+			got, err := UnmarshalL3VPNNLRIWithOptions(tt.input, Options{Withdraw: true, AFI: 1})
 			if err != nil {
 				t.Fatalf("UnmarshalL3VPNNLRI failed: %v", err)
 			}
-			// Withdrawals should have nil labels
+			// RFC 8277 §2.4: the Compatibility field is ignored, no labels
 			if got.NLRI[0].Label != nil {
-				t.Logf("Note: Withdrawal parsed with Label field: %v", got.NLRI[0].Label)
+				t.Errorf("Withdrawal parsed with Label field: %v", got.NLRI[0].Label)
 			}
 		})
 	}
@@ -748,7 +754,7 @@ func TestRFC4364_RealWorld_CiscoXR(t *testing.T) {
 		0x0a, 0x01, 0x01, // Prefix 10.1.1.0/24
 	}
 
-	got, err := UnmarshalL3VPNNLRI(input, false)
+	got, err := UnmarshalL3VPNNLRIWithOptions(input, Options{AFI: 1})
 	if err != nil {
 		t.Fatalf("UnmarshalL3VPNNLRI failed: %v", err)
 	}
@@ -789,7 +795,7 @@ func TestRFC4364_RealWorld_JuniperMX(t *testing.T) {
 		0xac, 0x10, // Prefix 172.16.0.0/16
 	}
 
-	got, err := UnmarshalL3VPNNLRI(input, false)
+	got, err := UnmarshalL3VPNNLRIWithOptions(input, Options{AFI: 1})
 	if err != nil {
 		t.Fatalf("UnmarshalL3VPNNLRI failed: %v", err)
 	}

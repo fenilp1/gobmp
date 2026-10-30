@@ -31,8 +31,11 @@ type MPReachNLRI struct {
 	NLRI                 []byte
 	// SRv6 is set when the label fields carry SRv6 SID bits under the RFC 9252
 	// §4 Transposition Scheme; see Update.HasSRv6Transposition.
-	SRv6    bool
-	addPath map[int]bool
+	SRv6 bool
+	// MultiLabel is the session's RFC 8277 Multiple Labels Capability state
+	// for this AFI/SAFI; it selects how labeled NLRI label stacks are read.
+	MultiLabel base.MultiLabel
+	addPath    map[int]bool
 }
 
 // GetAFISAFIType returns underlaying NLRI's type based on AFI/SAFI
@@ -154,7 +157,12 @@ func (mp *MPReachNLRI) GetNLRI73() (*srpolicy.NLRI73, error) {
 func (mp *MPReachNLRI) GetNLRIL3VPN() (*base.MPNLRI, error) {
 	if (mp.AddressFamilyID == 1 || mp.AddressFamilyID == 2) && mp.SubAddressFamilyID == 128 {
 		pathID := mp.addPath[NLRIMessageType(mp.AddressFamilyID, mp.SubAddressFamilyID)]
-		nlri, err := l3vpn.UnmarshalL3VPNNLRI(mp.NLRI, pathID, mp.SRv6)
+		nlri, err := l3vpn.UnmarshalL3VPNNLRIWithOptions(mp.NLRI, l3vpn.Options{
+			PathID:     pathID,
+			SRv6:       mp.SRv6,
+			MultiLabel: mp.MultiLabel,
+			AFI:        mp.AddressFamilyID,
+		})
 		if err != nil {
 			return nil, err
 		}

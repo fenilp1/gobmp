@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/golang/glog"
 	"github.com/sbezverk/gobmp/pkg/bgp"
 	"github.com/sbezverk/gobmp/pkg/bmp"
 	"github.com/sbezverk/gobmp/pkg/l3vpn"
@@ -97,14 +96,6 @@ func (p *producer) l3vpn(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, update 
 			p := make([]byte, 4)
 			copy(p, e.Prefix)
 			prfx.Prefix = net.IP(p).To4().String()
-		}
-		// Cap IPv4 prefix lengths at 32 bits
-		if prfx.IsIPv4 && prfx.PrefixLen > 32 {
-			if glog.V(6) {
-				glog.Warningf("Capping excessive IPv4 prefix length %d to 32 for L3VPN prefix %s",
-					prfx.PrefixLen, prfx.Prefix)
-			}
-			prfx.PrefixLen = 32
 		}
 		if prfx.Nexthop == "" {
 			prfx.IsNexthopIPv4 = prfx.IsIPv4

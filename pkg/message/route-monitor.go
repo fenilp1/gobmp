@@ -64,6 +64,7 @@ func (p *producer) processMPReach(attribute []byte, ph *bmp.PerPeerHeader, updat
 	reachableUpdate := copyUpdate(update)
 	operation := AddPrefix
 	if reach, ok := nlri.(*bgp.MPReachNLRI); ok {
+		reach.MultiLabel = p.multiLabelState(ph.GetTableKey(), reach.GetAFISAFIType())
 		validateNHC(reachableUpdate, reach.AddressFamilyID, reach.SubAddressFamilyID, reach.NextHopAddress, ph)
 		// RFC 7606 Section 2 treats advertised routes as withdrawn. An empty
 		// MP_REACH advertises none and must not become an End-of-RIB marker.
