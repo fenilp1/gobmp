@@ -29,7 +29,7 @@ func (p *producer) nlri(op int, ph *bmp.PerPeerHeader, update *bgp.Update) ([]*U
 	default:
 		return nil, fmt.Errorf("unknown operation %d", op)
 	}
-	mp, err := base.UnmarshalRoutesWithState(field, pathIDs)
+	mp, err := base.UnmarshalRoutesWithState(field, pathIDs, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal routes from NLRI with error: %w", err)
 	}
@@ -93,14 +93,6 @@ func (p *producer) nlri(op int, ph *bmp.PerPeerHeader, update *bgp.Update) ([]*U
 			prfx.OriginAS = ases[len(ases)-1]
 		}
 		prfx.IsIPv4 = true
-		// Cap IPv4 prefix lengths at 32 bits, avoiding excessive len calc
-		if prfx.PrefixLen > 32 {
-			if glog.V(6) {
-				glog.Warningf("Capping excessive IPv4 prefix length %d to 32 for prefix %s",
-					prfx.PrefixLen, pr.Prefix)
-			}
-			prfx.PrefixLen = 32
-		}
 		prfx.PeerIP = ph.GetPeerAddrString()
 		prfx.Nexthop = update.BaseAttributes.Nexthop
 		prfx.IsNexthopIPv4 = true

@@ -150,7 +150,7 @@ func (mp *MPUnReachNLRI) GetNLRIVPLS() (*vpls.Route, error) {
 // GetNLRIUnicast check for presence of Unicast AFI 1 or 2 and SAFI 1 in the MP_UNREACH_NLRI data and if exists, instantiate Unicast object
 func (mp *MPUnReachNLRI) GetNLRIUnicast() (*base.MPNLRI, error) {
 	if (mp.AddressFamilyID == 1 || mp.AddressFamilyID == 2) && mp.SubAddressFamilyID == 1 {
-		nlri, err := unicast.UnmarshalUnicastNLRIWithState(mp.WithdrawnRoutes, mp.PathIDs)
+		nlri, err := unicast.UnmarshalUnicastNLRIWithState(mp.WithdrawnRoutes, mp.PathIDs, mp.AddressFamilyID == 2)
 		if err != nil {
 			return nil, err
 		}
@@ -163,7 +163,7 @@ func (mp *MPUnReachNLRI) GetNLRIUnicast() (*base.MPNLRI, error) {
 // GetNLRIMulticast check for presence of NLRI Multicast AFI 1 or 2 and SAFI 2 in the NLRI 15 NLRI data and if exists, instantiate Multicast object
 func (mp *MPUnReachNLRI) GetNLRIMulticast() (*base.MPNLRI, error) {
 	if (mp.AddressFamilyID == 1 || mp.AddressFamilyID == 2) && mp.SubAddressFamilyID == 2 {
-		nlri, err := multicast.UnmarshalMulticastNLRIWithState(mp.WithdrawnRoutes, mp.PathIDs)
+		nlri, err := multicast.UnmarshalMulticastNLRIWithState(mp.WithdrawnRoutes, mp.PathIDs, mp.AddressFamilyID == 2)
 		if err != nil {
 			return nil, err
 		}

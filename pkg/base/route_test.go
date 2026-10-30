@@ -226,7 +226,7 @@ func TestUnmarshalRoutesWithState(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mp, err := UnmarshalRoutesWithState(tt.b, tt.s)
+			mp, err := UnmarshalRoutesWithState(tt.b, tt.s, false)
 			if tt.fail {
 				if err == nil {
 					t.Fatalf("UnmarshalRoutesWithState() = %+v, want an error", mp)
@@ -246,5 +246,46 @@ func TestUnmarshalRoutesWithState(t *testing.T) {
 				t.Errorf("UnmarshalRoutesWithState() = %+v, want one route, Path ID %d, length %d", mp.NLRI, tt.pathID, tt.length)
 			}
 		})
+	}
+}
+
+// TestUnmarshalRoutesPrefixLength checks that UnmarshalRoutesWithState
+// drops a prefix longer than the address family allows (RFC 4271 §4.3,
+// RFC 4760 §5, RFC 7606 §5.3), also on the Path ID retry, while
+// UnmarshalRoutes, which is not told the address family, does not.
+func TestUnmarshalRoutesPrefixLength(t *testing.T) {
+	v6Host := []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01}
+	// Without Path IDs: 0.62.129.48/32, 0.0.0.0/0, then a 62-bit prefix.
+	// With Path IDs: Path ID 0x20003e81 and a 48-bit prefix.
+	repro := []byte{0x20, 0x00, 0x3e, 0x81, 0x30, 0x00, 0x3e, 0x81, 0x0a, 0x00, 0x00}
+	tests := []struct {
+		name  string
+		input []byte
+		s     PathIDState
+		ipv6  bool
+		fail  bool
+	}{
+		{name: "IPv4 /32", input: []byte{0x20, 10, 0, 0, 1}, s: PathIDAbsent},
+		{name: "IPv4 /33", input: []byte{0x21, 10, 0, 0, 1, 0}, fail: true, s: PathIDAbsent},
+		{name: "IPv6 /128", input: append([]byte{0x80}, v6Host...), ipv6: true, s: PathIDAbsent},
+		{name: "IPv6 /129", input: append([]byte{0x81}, append(v6Host, 0)...), ipv6: true, fail: true, s: PathIDAbsent},
+		{name: "IPv4 /48 by the Path ID retry", input: repro, s: PathIDExpectAbsent, fail: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := UnmarshalRoutesWithState(tt.input, tt.s, tt.ipv6)
+			if tt.fail {
+				if err == nil {
+					t.Fatalf("UnmarshalRoutesWithState() = %+v, want an error", got)
+				}
+				return
+			}
+			if err != nil || len(got.NLRI) != 1 || int(got.NLRI[0].Length) != int(tt.input[0]) {
+				t.Fatalf("UnmarshalRoutesWithState() = %+v, %v, want one /%d route", got, err, tt.input[0])
+			}
+		})
+	}
+	if r, err := UnmarshalRoutes(repro, false); err != nil || len(r) != 1 || r[0].Length != 48 {
+		t.Errorf("UnmarshalRoutes() = %+v, %v, want the /48 read with Path IDs", r, err)
 	}
 }

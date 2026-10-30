@@ -28,16 +28,16 @@ func UnmarshalUnicastNLRI(b []byte, pathID bool) (*base.MPNLRI, error) {
 }
 
 // UnmarshalUnicastNLRIWithState builds MP NLRI object from the slice of
-// bytes of a SAFI 1 NLRI field, reading Path Identifiers as state s says (see
-// base.UnmarshalRoutesWithState).
-func UnmarshalUnicastNLRIWithState(b []byte, s base.PathIDState) (*base.MPNLRI, error) {
+// bytes of a SAFI 1 NLRI field of AFI 2 (ipv6) or 1, reading Path
+// Identifiers as state s says (see base.UnmarshalRoutesWithState).
+func UnmarshalUnicastNLRIWithState(b []byte, s base.PathIDState, ipv6 bool) (*base.MPNLRI, error) {
 	if glog.V(6) {
 		glog.Infof("MP Unicast NLRI Raw: %s", tools.MessageHex(b))
 	}
 	if len(b) == 0 {
 		return &base.MPNLRI{NLRI: make([]base.Route, 0)}, nil
 	}
-	return base.UnmarshalRoutesWithState(b, s)
+	return base.UnmarshalRoutesWithState(b, s, ipv6)
 }
 
 // Options gives the session and attribute context that RFC 8277 labeled

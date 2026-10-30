@@ -12,7 +12,7 @@ Message updates and major project changes should be documented here.
 - `unicast.UnmarshalLUNLRIWithOptions` decodes labeled unicast NLRI per `unicast.Options`; `UnmarshalLUNLRI` now wraps it
 - `base.PathIDState` and state-based decoders `bgp.UnmarshalMPReachNLRIWithState`, `bgp.UnmarshalMPUnReachNLRIWithState`,
   `base.UnmarshalRoutesWithState`, `unicast.UnmarshalUnicastNLRIWithState` and `multicast.UnmarshalMulticastNLRIWithState`;
-  the ADD-PATH map and bool forms are kept
+  the ADD-PATH map and bool forms are kept, and the routes decoders also take the address family
 - `bmp.PerPeerHeader.SessionKey` identifies a monitored session: peer type, distinguisher and address (Loc-RIB: BGP ID)
 
 #### Changed
@@ -27,6 +27,8 @@ Message updates and major project changes should be documented here.
   IPv4-mapped IPv6 peer, stay apart and a Peer Down removes only its own
 - Path IDs are expected per direction (RFC 7911 §5): Adj-RIB-In on peer Send and router Receive, Adj-RIB-Out the reverse,
   Loc-RIB whenever the capability is present; a failed parse is still retried with the setting flipped
+- SAFI 1/2 and the NLRI and Withdrawn Routes fields drop prefixes over 32 bits (IPv4) or 128 (IPv6) as malformed
+  (RFC 4271 §4.3, RFC 7606 §5.3) instead of capping IPv4 lengths at 32
 
 #### Deprecated
 
