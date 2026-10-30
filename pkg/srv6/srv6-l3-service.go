@@ -181,6 +181,10 @@ func UnmarshalSRv6L3Service(b []byte) (*L3Service, error) {
 	l3 := L3Service{
 		SubTLVs: make(map[uint8][]SvcSubTLV),
 	}
+	// RFC 9252 §7: a Service TLV with Length less than 1 is malformed.
+	if len(b) < 1 {
+		return nil, fmt.Errorf("srv6 L3 Service TLV too short: need at least 1 byte, have 0")
+	}
 	// Skipping reserved byte
 	stlv, err := UnmarshalSRv6L3ServiceSubTLV(b[1:])
 	if err != nil {
@@ -228,15 +232,24 @@ func UnmarshalSRv6L3ServiceSubTLV(b []byte) (map[uint8][]SvcSubTLV, error) {
 	return m, nil
 }
 
-// UnmarshalSRv6L3ServiceSubSubTLV instantiates L3 Service Sub TLV
+// UnmarshalSRv6L3ServiceSubSubTLV instantiates SRv6 Service Data Sub-Sub-TLVs.
+// b starts with the RESERVED2 octet of the SID Information Sub-TLV (RFC 9252 §3.1),
+// which is skipped. Per RFC 9252 §7 a Sub-Sub-TLV whose length is inconsistent
+// with the enclosing Sub-TLV is malformed.
 func UnmarshalSRv6L3ServiceSubSubTLV(b []byte) (map[uint8][]SvcSubSubTLV, error) {
 	var err error
 	m := make(map[uint8][]SvcSubSubTLV)
 	for p := 1; p < len(b); {
+		if p+3 > len(b) {
+			return nil, fmt.Errorf("srv6 Service Data sub-sub-TLV truncated at offset %d: need 3 bytes for header, have %d", p, len(b)-p)
+		}
 		t := b[p]
 		p++
 		l := binary.BigEndian.Uint16(b[p : p+2])
 		p += 2
+		if p+int(l) > len(b) {
+			return nil, fmt.Errorf("srv6 Service Data sub-sub-TLV value truncated at offset %d: need %d bytes, have %d", p, l, len(b)-p)
+		}
 		var s SvcSubSubTLV
 		switch t {
 		case 1:

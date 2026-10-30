@@ -2,13 +2,14 @@ package srv6
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/golang/glog"
 	"github.com/sbezverk/tools"
 )
 
 // SIDStructure defines SRv6 SID Structure TLV object
-// No RFC yet
+// https://www.rfc-editor.org/rfc/rfc9514#section-8
 type SIDStructure struct {
 	Type      uint16 `json:"type,omitempty"`
 	Length    uint16 `json:"length,omitempty"`
@@ -30,6 +31,10 @@ func (s *SIDStructure) GetLen() uint16 {
 func UnmarshalSRv6SIDStructureTLV(b []byte) (*SIDStructure, error) {
 	if glog.V(6) {
 		glog.Infof("SRv6 SID Structure TLV Raw: %s", tools.MessageHex(b))
+	}
+	// RFC 9514 §8: the SRv6 SID Structure TLV value is exactly 4 octets.
+	if len(b) != 4 {
+		return nil, fmt.Errorf("srv6 SID Structure TLV invalid length: need 4 bytes, have %d", len(b))
 	}
 	st := SIDStructure{}
 	p := 0

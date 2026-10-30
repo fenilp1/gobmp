@@ -37,7 +37,9 @@ func (o *OpenMessage) GetCapabilities() Capability {
 // in case of true, it also returns 4 bytes Autonomous System Number.
 func (o *OpenMessage) Is4BytesASCapable() (uint32, bool) {
 	v, ok := o.Capabilities[65]
-	if !ok {
+	// RFC 6793 §3: the capability value is 4 octets. A malformed one is kept raw
+	// by decode and reported here as not capable, so callers fall back to MyAS.
+	if !ok || len(v) == 0 || len(v[0].Value) != 4 {
 		return 0, false
 	}
 

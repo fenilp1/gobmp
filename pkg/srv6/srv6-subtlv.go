@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math"
 
 	"github.com/golang/glog"
 	"github.com/sbezverk/tools"
@@ -44,6 +45,10 @@ func UnmarshalSRv6SubTLV(b []byte) (SubTLV, error) {
 	p += 2
 	if p+int(l) > len(b) {
 		return nil, fmt.Errorf("not enough bytes to unmarshal SRv6 Sub TLV")
+	}
+	// Length is stored as l+4 and drives UnmarshalAllSRv6SubTLV's cursor; it must not wrap.
+	if int(l) > math.MaxUint16-4 {
+		return nil, fmt.Errorf("SRv6 Sub TLV length %d too large", l)
 	}
 	if glog.V(5) {
 		glog.Infof("SRv6 Sub TLV of type: %d Raw: %s", t, tools.MessageHex(b))

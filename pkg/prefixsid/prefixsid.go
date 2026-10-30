@@ -69,6 +69,10 @@ func UnmarshalBGPAttrPrefixSID(b []byte) (*PSid, error) {
 			psid.LabelIndex = &LabelIndexTLV{}
 			psid.LabelIndex.Type = 1
 			psid.LabelIndex.Length = binary.BigEndian.Uint16(b[p : p+2])
+			// RFC 8669 §3.1: Length is 7; any other value would desynchronize the TLV cursor.
+			if psid.LabelIndex.Length != 7 {
+				return nil, fmt.Errorf("prefix SID label index TLV invalid length %d, expected 7", psid.LabelIndex.Length)
+			}
 			p += 2
 			// Skip reserved byte
 			p++

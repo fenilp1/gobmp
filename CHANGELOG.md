@@ -4,6 +4,16 @@ Message updates and major project changes should be documented here.
 
 ## [Unreleased]
 
+### 2026-10-30
+
+#### Fixed
+
+- Panic on truncated SRv6 Service Data Sub-Sub-TLVs and empty SRv6 L3 Service TLVs per RFC 9252 Section 3.2
+- Panic on a BGP-LS SRv6 SID Structure TLV whose length is not 4 per RFC 9514 Section 8
+- Prefix-SID Label-Index TLV with a length other than 7 misparsing the following TLVs per RFC 8669 Section 3.1
+- SRv6 sub-TLV length close to 65535 wrapping and stalling the sub-TLV parser
+- Panic on a 4-octet AS capability whose length is not 4; `local_asn` falls back to My AS per RFC 6793 Section 3
+
 ### 2026-03-01
 
 #### Added
