@@ -10,6 +10,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/IBM/sarama"
@@ -103,8 +105,66 @@ type publisher struct {
 	clusterAdmin sarama.ClusterAdmin
 	config       *sarama.Config
 	producer     sarama.AsyncProducer
-	stopCh       chan struct{}
-	topicPrefix  string
+	// stopCh is closed as Stop begins: a publish still waiting for room in
+	// the producer's input then returns errStopped, its message dropped,
+	// so that Stop can take mu. The server stops publishing before it calls
+	// Stop, so this only matters for a publish racing Stop.
+	stopCh chan struct{}
+	// drained is closed once the producer has closed its Successes and
+	// Errors channels, that is once it has delivered or failed every
+	// message it was given.
+	drained     chan struct{}
+	topicPrefix string
+	// mu is held shared by a publish while it sends to the producer's
+	// input and exclusively by Stop to set stopped, so the input is closed
+	// only once no publish can send to it.
+	mu        sync.RWMutex
+	stopped   bool
+	stopOnce  sync.Once
+	delivered atomic.Int64
+	failed    atomic.Int64
+}
+
+// errStopped is returned by a publish after Stop.
+var errStopped = errors.New("kafka publisher is stopped")
+
+// newPublisher returns a publisher of producer and starts reading the
+// producer's Successes and Errors channels.
+func newPublisher(producer sarama.AsyncProducer, ca sarama.ClusterAdmin, config *sarama.Config, topicPrefix string) *publisher {
+	p := &publisher{
+		clusterAdmin: ca,
+		config:       config,
+		producer:     producer,
+		stopCh:       make(chan struct{}),
+		drained:      make(chan struct{}),
+		topicPrefix:  topicPrefix,
+	}
+	go p.drain()
+	return p
+}
+
+// drain reads the producer's Successes and Errors channels until it closes
+// both.
+func (p *publisher) drain() {
+	defer close(p.drained)
+	successes, errs := p.producer.Successes(), p.producer.Errors()
+	for successes != nil || errs != nil {
+		select {
+		case _, ok := <-successes:
+			if !ok {
+				successes = nil
+				continue
+			}
+			p.delivered.Add(1)
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil
+				continue
+			}
+			p.failed.Add(1)
+			glog.Errorf("failed to produce message with error: %+v", *err)
+		}
+	}
 }
 
 // topicForMessage maps a BMP message type to its Kafka topic.
@@ -184,20 +244,43 @@ func (p *publisher) produceMessage(topic string, key []byte, msg []byte) error {
 	var m sarama.ByteEncoder
 	k = key
 	m = msg
-	p.producer.Input() <- &sarama.ProducerMessage{
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.stopped {
+		return errStopped
+	}
+	select {
+	case p.producer.Input() <- &sarama.ProducerMessage{
 		Topic: topic,
 		Key:   k,
 		Value: m,
+	}:
+		return nil
+	case <-p.stopCh:
+		return errStopped
 	}
-
-	return nil
 }
 
+// Stop closes the producer once it has delivered, or failed, every message
+// published before, then the cluster admin. Publishing after Stop returns
+// an error. Stop may be called more than once. Stop has no timeout of its
+// own: with the brokers unreachable the flush takes as long as sarama's
+// retries, and gobmp bounds it only by its shutdown deadline.
 func (p *publisher) Stop() {
-	close(p.stopCh)
-	if p.clusterAdmin != nil {
-		_ = p.clusterAdmin.Close()
-	}
+	p.stopOnce.Do(func() {
+		close(p.stopCh)
+		p.mu.Lock()
+		p.stopped = true
+		p.mu.Unlock()
+		if p.producer != nil {
+			p.producer.AsyncClose()
+			<-p.drained
+			glog.Infof("Kafka producer closed: %d messages delivered, %d failed", p.delivered.Load(), p.failed.Load())
+		}
+		if p.clusterAdmin != nil {
+			_ = p.clusterAdmin.Close()
+		}
+	})
 }
 
 // NewKafkaPublisher instantiates a new Kafka publisher. When SkipTopicCreation
@@ -274,28 +357,8 @@ func NewKafkaPublisher(kConfig *Config) (pub.Publisher, error) {
 		return nil, err
 	}
 	glog.V(5).Infof("Initialized Kafka Async producer")
-	stopCh := make(chan struct{})
-	go func(producer sarama.AsyncProducer, stopCh <-chan struct{}) {
-		for {
-			select {
-			case <-producer.Successes():
-			case err := <-producer.Errors():
-				glog.Errorf("failed to produce message with error: %+v", *err)
-			case <-stopCh:
-				_ = producer.Close()
-				return
-			}
-		}
-	}(producer, stopCh)
-
 	adminOwnedByPublisher = true
-	return &publisher{
-		stopCh:       stopCh,
-		clusterAdmin: ca,
-		config:       config,
-		producer:     producer,
-		topicPrefix:  kConfig.TopicPrefix,
-	}, nil
+	return newPublisher(producer, ca, config, kConfig.TopicPrefix), nil
 }
 
 func validator(kConfig *Config) error {
