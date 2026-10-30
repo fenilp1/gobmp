@@ -73,6 +73,9 @@ type BaseAttributes struct {
 	LgCommunityList []string `json:"large_community_list,omitempty"`
 	// PrefixSID represents the Prefix Segment Identifier (SID) attribute as defined in RFC 8669.
 	PrefixSID *prefixsid.PSid `json:"prefix_sid,omitempty"`
+	// PrefixSIDMalformed reports a Prefix-SID attribute discarded as malformed
+	// (RFC 8669 §6); with an SRv6 Service TLV, RFC 9252 §7 requires treat-as-withdraw.
+	PrefixSIDMalformed bool `json:"prefix_sid_malformed,omitempty"`
 	// BGPPrefixSID will be deprecated in favor of PrefixSID on Septermber 16, 2027
 	BGPPrefixSID *BGPPrefixSID `json:"bgp_prefix_sid,omitempty"`
 	OTC          uint32        `json:"otc,omitempty"` // RFC 9234 Only to Customer (OTC) Attribute (Type 35)
@@ -237,6 +240,10 @@ func (ba *BaseAttributes) Equal(oba *BaseAttributes) (bool, []string) {
 	if ba.OTC != oba.OTC {
 		equal = false
 		diffs = append(diffs, "otc mismatch: "+strconv.FormatUint(uint64(ba.OTC), 10)+" and "+strconv.FormatUint(uint64(oba.OTC), 10))
+	}
+	if ba.PrefixSIDMalformed != oba.PrefixSIDMalformed {
+		equal = false
+		diffs = append(diffs, "prefix_sid_malformed mismatch")
 	}
 	if !bytes.Equal(ba.NHCAttr, oba.NHCAttr) || !reflect.DeepEqual(ba.NHC, oba.NHC) || ba.NHCMalformed != oba.NHCMalformed || ba.NHCEmpty != oba.NHCEmpty || ba.NHCDiscarded != oba.NHCDiscarded || ba.NHCUnverified != oba.NHCUnverified {
 		equal = false
@@ -485,6 +492,7 @@ func unmarshalBaseAttrsFromSlice(attrs []PathAttribute, as4hint *bool) (*BaseAtt
 			baseAttr.PrefixSID, err = prefixsid.UnmarshalBGPAttrPrefixSID(b)
 			if err != nil {
 				baseAttr.PrefixSID = nil
+				baseAttr.PrefixSIDMalformed = true
 				glog.Errorf("failed to unmarshal Prefix-SID attribute with error: %+v", err)
 			}
 		case 41:

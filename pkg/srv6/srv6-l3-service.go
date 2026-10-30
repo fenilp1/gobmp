@@ -24,8 +24,13 @@ type SIDStructureSubSubTLV struct {
 
 // UnmarshalSIDStructureSubSubTLV instantiates SID Structure Sub Sub TLV
 func UnmarshalSIDStructureSubSubTLV(b []byte) (*SIDStructureSubSubTLV, error) {
+	// RFC 9252 §3.2.1: the value is 6 octets. §7 does not list a longer value
+	// as malformed, so trailing octets are ignored.
 	if len(b) < 6 {
 		return nil, fmt.Errorf("srv6 SID Structure sub-sub-TLV too short: need 6 bytes, have %d", len(b))
+	}
+	if len(b) > 6 {
+		glog.Warningf("srv6 SID Structure sub-sub-TLV length %d, expected 6; ignoring %d trailing bytes", len(b), len(b)-6)
 	}
 	p := 0
 	tlv := &SIDStructureSubSubTLV{}

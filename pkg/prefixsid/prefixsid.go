@@ -56,9 +56,25 @@ func UnmarshalBGPAttrPrefixSID(b []byte) (*PSid, error) {
 		LabelIndex:     nil,
 		OriginatorSRGB: nil,
 	}
+	// Only the first instance of these TLVs is used: Label-Index and Originator
+	// SRGB (RFC 8669 §6), SRv6 L3 and L2 Service (RFC 9252 §7). Later ones are
+	// skipped unparsed, so a malformed duplicate cannot discard a good first
+	// instance. The L2 Service TLV (6) is not decoded but follows the same rule.
+	var seen [7]bool
 	for p := 0; p < len(b); {
 		if p+3 > len(b) {
 			return nil, fmt.Errorf("prefix SID truncated at offset %d: need at least 3 bytes for TLV header, have %d", p, len(b)-p)
+		}
+		if t := b[p]; t == 1 || t == 3 || t == 5 || t == 6 {
+			if seen[t] {
+				l := int(binary.BigEndian.Uint16(b[p+1 : p+3]))
+				if p+3+l > len(b) {
+					return nil, fmt.Errorf("prefix SID duplicate TLV %d value truncated at offset %d: need %d bytes, have %d", t, p+3, l, len(b)-p-3)
+				}
+				p += 3 + l
+				continue
+			}
+			seen[t] = true
 		}
 		switch b[p] {
 		case 1:

@@ -6,10 +6,15 @@ Message updates and major project changes should be documented here.
 
 ### 2026-10-30
 
+#### Added
+
+- `base_attrs.prefix_sid_malformed` set when a malformed Prefix-SID attribute is discarded, for RFC 9252 Section 7 treat-as-withdraw
+
 #### Changed
 
 - Multiprotocol, BGP Role and 4-octet AS capabilities of invalid length are kept raw in `adv_cap`/`recv_cap` with a warning
 - `OpenMessage.BGPRoleCapability` treats identical duplicate Roles as one Role per RFC 9234 Section 4.2
+- Prefix-SID keeps the first Label-Index, Originator SRGB and SRv6 Service TLV and ignores later duplicates per RFC 8669 Section 6
 
 #### Fixed
 

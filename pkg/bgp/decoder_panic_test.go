@@ -114,3 +114,24 @@ func TestGetSRv6SIDStructure_ShortTLV(t *testing.T) {
 		t.Fatalf("expected nil SID structure, got %+v", s)
 	}
 }
+
+// A discarded Prefix-SID is flagged so consumers can apply RFC 9252 §7
+// treat-as-withdraw.
+func TestPrefixSIDMalformedFlag(t *testing.T) {
+	for name, tc := range map[string]struct {
+		psid      []byte
+		malformed bool
+	}{
+		"valid":     {[]byte{0x01, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x64}, false},
+		"truncated": {[]byte{0x01, 0x00, 0x07, 0x00, 0x00}, true},
+	} {
+		attrs := append([]byte{0x40, 0x01, 0x01, 0x00, 0xc0, 0x28, byte(len(tc.psid))}, tc.psid...)
+		_, ba, err := UnmarshalBGPPathAttributes(attrs)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if ba.PrefixSIDMalformed != tc.malformed || (ba.PrefixSID == nil) != tc.malformed {
+			t.Errorf("%s: PrefixSIDMalformed=%t PrefixSID=%v, want malformed=%t", name, ba.PrefixSIDMalformed, ba.PrefixSID, tc.malformed)
+		}
+	}
+}

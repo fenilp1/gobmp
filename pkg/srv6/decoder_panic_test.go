@@ -42,6 +42,19 @@ func TestUnmarshalSRv6L3Service_Empty(t *testing.T) {
 	}
 }
 
+// RFC 9252 §7 does not list an over-long SID Structure Sub-Sub-TLV as
+// malformed: the first 6 octets are decoded and the rest ignored.
+func TestUnmarshalSIDStructureSubSubTLV_LongerThanSix(t *testing.T) {
+	s, err := UnmarshalSIDStructureSubSubTLV([]byte{0x28, 0x18, 0x10, 0x00, 0x10, 0x40, 0x00})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := SIDStructureSubSubTLV{LocalBlockLength: 0x28, LocalNodeLength: 0x18, FunctionLength: 0x10, TranspositionLength: 0x10, TranspositionOffset: 0x40}
+	if *s != want {
+		t.Fatalf("got %+v, want %+v", *s, want)
+	}
+}
+
 func TestUnmarshalSRv6SIDStructureTLV_InvalidLength(t *testing.T) {
 	for _, n := range []int{0, 1, 3, 5} {
 		if _, err := UnmarshalSRv6SIDStructureTLV(make([]byte, n)); err == nil {
