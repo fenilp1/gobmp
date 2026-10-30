@@ -8,7 +8,8 @@ End-of-RIB outputs follow the same sequence.
 
 This guarantee applies to publication calls within one connection. It does not
 provide global ordering across connections or Kafka/NATS topics, broker delivery
-acknowledgements, a cross-topic commit barrier, or a publisher flush guarantee.
+acknowledgements, or a cross-topic commit barrier; flushing at shutdown is
+described below.
 It also does not change which UPDATEs are recognized as End-of-RIB.
 
 ## Traffic before Peer Up
@@ -50,8 +51,8 @@ gobmp bounds shutdown at 25 s: if server Stop has not returned by then, it exits
 with status 1 and messages not yet published are lost. The 25 s fit within the
 default 30 s Kubernetes grace period; Docker's default stop timeout is 10 s, so
 raise it to at least 30 s (`docker stop -t 30`, Compose `stop_grace_period`) or
-the container is killed before the deadline. No broker-delivery/flush guarantee
-is added.
+the container is killed before the deadline. The Kafka publisher's Stop waits
+until every buffered message is delivered or fails.
 
 Regression tests exercise actual BMP wire frames through the parser/producer
 pipeline, including announcement, withdrawal, explicit End-of-RIB and Peer Down,
