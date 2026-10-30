@@ -18,6 +18,7 @@ Message updates and major project changes should be documented here.
 - Closing a BMP connection, and stopping gobmp, publishes every message already read from it before the publisher is stopped, instead of dropping them or publishing to a stopped publisher
 - gobmp stops gracefully on SIGTERM (docker/Kubernetes stop) as it does on SIGINT, publishing what it has read within 25 s or exiting with status 1; a second signal exits at once
 - The Kafka publisher's Stop waits until the producer has delivered or failed every buffered message before closing, instead of dropping them on exit, and a publish after Stop returns an error instead of panicking
+- The NATS publisher reconnects for as long as the server is away instead of giving up after 10 attempts and failing every later publish, and publishes to JetStream asynchronously, keeping the order of the publish calls, with at most 4096 messages awaiting acknowledgement (failures are logged, at most once a second); Stop waits up to 10 s for the acknowledgements and a publish after Stop returns an error
 
 ### 2026-03-01
 

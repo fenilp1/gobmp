@@ -3,6 +3,7 @@ package nats
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/golang/glog"
@@ -45,15 +46,28 @@ const (
 )
 
 var (
-	maxReconnects = 10
 	natsTimeout   = time.Second
 	waitReconnect = time.Second
+	// maxPendingAcks bounds the publishes awaiting their JetStream
+	// acknowledgement; at the bound a publish waits for one.
+	maxPendingAcks = 4096
+	// ackTimeout is how long a publish waits for its acknowledgement before
+	// it is reported failed.
+	ackTimeout = 30 * time.Second
+	// stopTimeout bounds how long Stop waits for outstanding
+	// acknowledgements.
+	stopTimeout = 10 * time.Second
 )
+
+// errStopped is returned by a publish after Stop.
+var errStopped = errors.New("nats publisher is stopped")
 
 // jetStreamClient is the subset of nats.JetStreamContext used by publisher.
 // Defining a narrow interface lets tests inject a fake without a full NATS server.
 type jetStreamClient interface {
-	PublishMsg(m *nats.Msg, opts ...nats.PubOpt) (*nats.PubAck, error)
+	PublishMsgAsync(m *nats.Msg, opts ...nats.PubOpt) (nats.PubAckFuture, error)
+	PublishAsyncComplete() <-chan struct{}
+	PublishAsyncPending() int
 	AddStream(cfg *nats.StreamConfig, opts ...nats.JSOpt) (*nats.StreamInfo, error)
 	StreamInfo(stream string, opts ...nats.JSOpt) (*nats.StreamInfo, error)
 	UpdateStream(cfg *nats.StreamConfig, opts ...nats.JSOpt) (*nats.StreamInfo, error)
@@ -62,6 +76,41 @@ type jetStreamClient interface {
 type publisher struct {
 	nc *nats.Conn
 	js jetStreamClient
+	// stopCh is closed as Stop begins: a publish waiting for an
+	// acknowledgement slot then returns errStopped, its message dropped,
+	// once its current stalled attempt (up to 200 ms in nats.go) ends, so
+	// that Stop can take mu. The server stops publishing before it calls
+	// Stop, so this only matters for a publish racing Stop.
+	stopCh chan struct{}
+	// mu is held shared by a publish and exclusively by Stop to set
+	// stopped, so that Stop waits only for acknowledgements of publishes
+	// that have returned.
+	mu       sync.RWMutex
+	stopped  bool
+	stopOnce sync.Once
+}
+
+func newPublisher(nc *nats.Conn, js jetStreamClient) *publisher {
+	return &publisher{nc: nc, js: js, stopCh: make(chan struct{})}
+}
+
+// errorLog logs failed publishes at most once a second, as a server outage
+// fails every outstanding one at once.
+type errorLog struct {
+	mu         sync.Mutex
+	last       time.Time
+	suppressed int
+}
+
+func (l *errorLog) log(m *nats.Msg, err error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if now := time.Now(); now.Sub(l.last) >= time.Second {
+		glog.Errorf("NATS JetStream publish to %s failed: %v (%d more failures not logged)", m.Subject, err, l.suppressed)
+		l.last, l.suppressed = now, 0
+		return
+	}
+	l.suppressed++
 }
 
 // topicForMessage maps a BMP message type to its NATS subject.
@@ -147,16 +196,50 @@ func (p *publisher) produceMessage(subject string, key []byte, data []byte) erro
 		Data:    data,
 	}
 
-	_, err := p.js.PublishMsg(msg)
-	if err != nil {
-		return err
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.stopped {
+		return errStopped
 	}
-
-	return nil
+	// Publishing asynchronously keeps the order of the publishes; the
+	// acknowledgements arrive later, failures go to the error handler.
+	for {
+		_, err := p.js.PublishMsgAsync(msg)
+		if !errors.Is(err, nats.ErrTooManyStalledMsgs) {
+			return err
+		}
+		// maxPendingAcks publishes await acknowledgement: keep waiting,
+		// which holds up the BMP connection being published.
+		select {
+		case <-p.stopCh:
+			return errStopped
+		default:
+		}
+	}
 }
 
+// Stop waits up to stopTimeout for the acknowledgements of the messages
+// published before, then closes the connection. Publishing after Stop
+// returns an error. Stop may be called more than once.
 func (p *publisher) Stop() {
-	p.nc.Close()
+	p.stopOnce.Do(func() {
+		close(p.stopCh)
+		p.mu.Lock()
+		p.stopped = true
+		p.mu.Unlock()
+		if p.js != nil {
+			t := time.NewTimer(stopTimeout)
+			select {
+			case <-p.js.PublishAsyncComplete():
+			case <-t.C:
+				glog.Errorf("NATS publisher stopping with %d JetStream acknowledgements outstanding after %s", p.js.PublishAsyncPending(), stopTimeout)
+			}
+			t.Stop()
+		}
+		if p.nc != nil {
+			p.nc.Close()
+		}
+	})
 }
 
 // mergeSubjects returns a new slice containing all elements of existing plus
@@ -219,9 +302,22 @@ func NewPublisher(natsSrv string) (pub.Publisher, error) {
 
 	opts := []nats.Option{
 		nats.Name("gobmp-producer"),
-		nats.MaxReconnects(maxReconnects),
+		// Keep reconnecting however long the server is away: a closed
+		// connection would fail every publish while gobmp keeps running.
+		nats.MaxReconnects(-1),
 		nats.ReconnectWait(waitReconnect),
 		nats.Timeout(natsTimeout),
+		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
+			if err != nil {
+				glog.Warningf("NATS connection lost: %v, reconnecting", err)
+			}
+		}),
+		nats.ReconnectHandler(func(nc *nats.Conn) {
+			glog.Infof("NATS connection reestablished to %s", nc.ConnectedUrlRedacted())
+		}),
+		nats.ClosedHandler(func(*nats.Conn) {
+			glog.Infof("NATS connection closed")
+		}),
 	}
 
 	nc, err := nats.Connect(natsSrv, opts...)
@@ -230,18 +326,24 @@ func NewPublisher(natsSrv string) (pub.Publisher, error) {
 	}
 
 	// Create a JetStream context
-	js, err := nc.JetStream()
+	errs := &errorLog{}
+	js, err := nc.JetStream(
+		nats.PublishAsyncMaxPending(maxPendingAcks),
+		nats.PublishAsyncTimeout(ackTimeout),
+		nats.PublishAsyncErrHandler(func(_ nats.JetStream, m *nats.Msg, err error) {
+			errs.log(m, err)
+		}),
+	)
 	if err != nil {
+		nc.Close()
 		return nil, err
 	}
 
-	p := &publisher{
-		nc: nc,
-		js: js,
-	}
+	p := newPublisher(nc, js)
 
 	// Create the streams
 	if err := p.createStreams(); err != nil {
+		nc.Close()
 		return nil, err
 	}
 
