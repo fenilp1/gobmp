@@ -282,6 +282,14 @@ var flowspecSubTypes = map[uint8]string{
 	0xd: CPFlowspecSFC,
 }
 
+// Generic Transitive Extended Community Part 2 (0x81) Sub-Types assign only
+// 0x08 (Flow spec rt-redirect IPv4 format). Part 3 (0x82) assigns 0x04, 0x08,
+// 0x84 and 0x85, of which only 0x08 (Flow spec rt-redirect AS-4octet format)
+// is flowspec (RFC 8955 Section 7.4); the others are not named here.
+var flowspecRedirectSubTypes = map[uint8]string{
+	0x8: CPFlowspecRedirect,
+}
+
 func getSubType(m map[uint8]string, subType uint8) string {
 	if s, ok := m[subType]; ok {
 		return s
@@ -559,7 +567,7 @@ func type81(subType uint8, value []byte) string {
 	} else {
 		s = fmt.Sprintf("invalid value length of %d", len(value))
 	}
-	return getSubType(flowspecSubTypes, subType) + s
+	return getSubType(flowspecRedirectSubTypes, subType) + s
 }
 
 func type82(subType uint8, value []byte) string {
@@ -575,7 +583,7 @@ func type82(subType uint8, value []byte) string {
 	} else {
 		s = fmt.Sprintf("invalid value length of %d", len(value))
 	}
-	return getSubType(flowspecSubTypes, subType) + s
+	return getSubType(flowspecRedirectSubTypes, subType) + s
 }
 
 // extComm defines a map with Extended Community as a key, it return a function to process a type specific sub type.
