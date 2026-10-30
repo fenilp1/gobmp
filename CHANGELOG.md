@@ -4,6 +4,28 @@ Message updates and major project changes should be documented here.
 
 ## [Unreleased]
 
+### 2026-10-30
+
+#### Added
+
+- `vpls.DecodeLayer2InfoValue` and `vpls.Layer2Flag{S,C,R,T}`: one Layer2 Info value decoder (RFC 4761 §3.2.4, RFC 8395 §2) shared by VPLS messages and `vpls.ParseLayer2InfoExtComm`; it returns an error for a value that is not 6 octets
+- Layer2 Info Extended Community (type 0x80, sub-type 0x0a, RFC 4761 §3.2.4) is decoded: `80 0a 13 00 05 dc 00 00` reads `layer2-info=Encaps=19 T=false R=false C=false S=false MTU=1500` instead of `Subtype unknown=[ 0x13, 0x00, 0x05, 0xDC, 0x00, 0x00 ]`
+
+#### Changed
+
+- **Breaking:** published VPLS `encap_type` strings change to the IANA names (see Fixed); consumers matching on the old strings (`Ethernet (802.3)`, `VLAN (802.1Q)`, `Ethernet VLAN (802.1Q)`, `Frame Relay DLCI` for type 1, `HDLC`) must update
+- **Breaking:** VPLS `control_word` / `sequenced_delivery` values change for every route whose Layer2 Info flags have only one of C or S set (see Fixed)
+- `vpls.Layer2InfoExtComm` gains `FlowLabelTx` (T) and `FlowLabelRx` (R) fields (RFC 8395 §2), and its `String()` lists flags as `T,R,C,S`; `vpls.ParseLayer2InfoExtComm` now reads C from 0x02 and S from 0x01
+
+#### Deprecated
+
+- `vpls.EncapFrameRelayDLCI`, `EncapEthernet`, `EncapVLAN` and `EncapEthernetVLAN` (misnamed Encaps Types 1, 4, 5 and 19); use `EncapFrameRelay`, `EncapEthernetTagged`, `EncapEthernetRaw` and `EncapVPLS`
+
+#### Fixed
+
+- VPLS `encap_type` (and `vpls.EncapTypeToString`) now uses the IANA BGP Layer 2 Encapsulation Types names (RFC 6624 §7): 19 reads `VPLS` (was `Ethernet VLAN (802.1Q)`), 4 `Ethernet (VLAN) Tagged Mode` (was `Ethernet (802.3)`), 5 `Ethernet Raw Mode` (was `VLAN (802.1Q)`), 1 `Frame Relay` (was `Frame Relay DLCI`), 2 `ATM AAL5 SDU VCC transport` (was `ATM AAL5 VCC transport`), 6 `Cisco HDLC` (was `HDLC`); 15, 17, 18, 20, 21, 25 (`Frame Relay DLCI`) and 40–44 are now named instead of `Unknown (N)`
+- VPLS `control_word` and `sequenced_delivery` were swapped: Layer2 Info Control Flags are `|Z|Z|Z|Z|T|R|C|S|` (RFC 4761 §3.2.4 Fig. 4, RFC 8395 §2), so flags `0x01` now publish `sequenced_delivery:true` (was `control_word:true`) and `0x02` publish `control_word:true` (was `sequenced_delivery:true`)
+
 ### 2026-03-01
 
 #### Added

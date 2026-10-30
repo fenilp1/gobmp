@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/golang/glog"
+	"github.com/sbezverk/gobmp/pkg/vpls"
 	"github.com/sbezverk/tools"
 )
 
@@ -515,6 +516,19 @@ func type80(subType uint8, value []byte) string {
 
 	if len(value) == 6 {
 		switch subType {
+		case 0x0a:
+			// Layer2 Info Extended Community (RFC 4761 Section 3.2.4):
+			// Encaps Type(1), Control Flags(1), Layer-2 MTU(2), Reserved(2).
+			// Control Flags bits are |Z|Z|Z|Z|T|R|C|S| (RFC 8395 Section 2).
+			if l2, err := vpls.DecodeLayer2InfoValue(value); err == nil {
+				return ECPLayer2Info + "Encaps=" + strconv.Itoa(int(l2.EncapType)) +
+					" T=" + strconv.FormatBool(l2.FlowLabelTx) +
+					" R=" + strconv.FormatBool(l2.FlowLabelRx) +
+					" C=" + strconv.FormatBool(l2.ControlWord) +
+					" S=" + strconv.FormatBool(l2.SequencedDel) +
+					" MTU=" + strconv.Itoa(int(l2.MTU))
+			}
+			s = tools.MessageHex(value)
 		case 0x06:
 			rate := uint32(math.Float32frombits(binary.BigEndian.Uint32(value[2:]))) * 8
 			s = "AS: " + strconv.Itoa(int(binary.BigEndian.Uint16(value[:2]))) + " Rate: " + strconv.FormatUint(uint64(rate), 10) + " bps"

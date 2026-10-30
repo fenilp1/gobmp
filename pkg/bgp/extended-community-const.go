@@ -120,6 +120,10 @@ const (
 	// of the BGP MUP Extended Community	[draft-ietf-bess-mup-safi]
 	ECPMUPInterworkSegment = "mup-is="
 
+	// ECPLayer2Info extended community prefix for Layer2 Info Extended Community
+	// (Generic Transitive sub-type 0x0a) [RFC 4761]
+	ECPLayer2Info = "layer2-info="
+
 	// ECPFlowspec extended community prefix for Flowspec extended community
 	ECPFlowspec = "flowspec="
 

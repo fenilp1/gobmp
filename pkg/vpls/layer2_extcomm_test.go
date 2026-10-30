@@ -14,21 +14,21 @@ func TestParseLayer2InfoExtComm(t *testing.T) {
 		{
 			name: "Valid Layer2 Info - Ethernet with Control Word",
 			// Type: 0x800a (handled by caller)
-			// Encap: Ethernet (4)
-			// Flags: C=1, S=0 (0x01)
+			// Encap: Ethernet (VLAN) Tagged Mode (4)
+			// Flags: C=1, S=0 (0x02; RFC 4761 Figure 4 puts S in the LSB)
 			// MTU: 1500 (0x05dc)
 			// Reserved: 0x0000
 			input: []byte{
 				0x80, 0x0a, // Type
 				0x04,       // Encap: Ethernet
-				0x01,       // Flags: C=1
+				0x02,       // Flags: C=1
 				0x05, 0xdc, // MTU: 1500
 				0x00, 0x00, // Reserved
 			},
 			wantErr: false,
 			verify: func(t *testing.T, ec *Layer2InfoExtComm) {
-				if ec.EncapType != EncapEthernet {
-					t.Errorf("EncapType = %d, want %d (Ethernet)", ec.EncapType, EncapEthernet)
+				if ec.EncapType != EncapEthernetTagged {
+					t.Errorf("EncapType = %d, want %d (Ethernet Tagged Mode)", ec.EncapType, EncapEthernetTagged)
 				}
 				if !ec.ControlWord {
 					t.Error("ControlWord = false, want true")
@@ -52,8 +52,8 @@ func TestParseLayer2InfoExtComm(t *testing.T) {
 			},
 			wantErr: false,
 			verify: func(t *testing.T, ec *Layer2InfoExtComm) {
-				if ec.EncapType != EncapVLAN {
-					t.Errorf("EncapType = %d, want %d (VLAN)", ec.EncapType, EncapVLAN)
+				if ec.EncapType != EncapEthernetRaw {
+					t.Errorf("EncapType = %d, want %d (Ethernet Raw Mode)", ec.EncapType, EncapEthernetRaw)
 				}
 				if !ec.ControlWord {
 					t.Error("ControlWord = false, want true")
@@ -64,18 +64,18 @@ func TestParseLayer2InfoExtComm(t *testing.T) {
 			},
 		},
 		{
-			name: "Valid Layer2 Info - Ethernet VLAN (type 19)",
+			name: "Valid Layer2 Info - VPLS (type 19)",
 			input: []byte{
 				0x80, 0x0a,
-				0x13,       // Encap: 19 (Ethernet VLAN)
+				0x13,       // Encap: 19 (VPLS, RFC 4761 Section 3.2.4)
 				0x00,       // Flags: none
 				0x05, 0xdc, // MTU: 1500
 				0x00, 0x00,
 			},
 			wantErr: false,
 			verify: func(t *testing.T, ec *Layer2InfoExtComm) {
-				if ec.EncapType != EncapEthernetVLAN {
-					t.Errorf("EncapType = %d, want %d (Ethernet VLAN)", ec.EncapType, EncapEthernetVLAN)
+				if ec.EncapType != EncapVPLS {
+					t.Errorf("EncapType = %d, want %d (VPLS)", ec.EncapType, EncapVPLS)
 				}
 				if ec.ControlWord {
 					t.Error("ControlWord = true, want false")
@@ -165,23 +165,38 @@ func TestParseLayer2InfoExtComm(t *testing.T) {
 	}
 }
 
+// TestEncapTypeToString checks names against the IANA "BGP Layer 2
+// Encapsulation Types" registry (RFC 6624 Section 7; Table 1 in Section 3);
+// Encaps Type 19 is VPLS per RFC 4761 Section 3.2.4.
 func TestEncapTypeToString(t *testing.T) {
 	tests := []struct {
 		encapType uint8
 		want      string
 	}{
-		{EncapFrameRelayDLCI, "Frame Relay DLCI"},
-		{EncapATMAAL5, "ATM AAL5 VCC transport"},
+		{1, "Frame Relay"},
+		{2, "ATM AAL5 SDU VCC transport"},
 		{EncapATMTransparent, "ATM transparent cell transport"},
-		{EncapEthernet, "Ethernet (802.3)"},
-		{EncapVLAN, "VLAN (802.1Q)"},
-		{EncapHDLC, "HDLC"},
+		{4, "Ethernet (VLAN) Tagged Mode"},
+		{5, "Ethernet Raw Mode"},
+		{6, "Cisco HDLC"},
 		{EncapPPP, "PPP"},
 		{EncapSONETSDH, "SONET/SDH Circuit Emulation Service"},
 		{EncapATMnto1VCC, "ATM n-to-one VCC cell transport"},
 		{EncapATMnto1VPC, "ATM n-to-one VPC cell transport"},
 		{EncapIPLayer2, "IP Layer 2 Transport"},
-		{EncapEthernetVLAN, "Ethernet VLAN (802.1Q)"},
+		{19, "VPLS"},
+		{15, "Frame Relay Port mode"},
+		{17, "Structure-agnostic E1 over packet"},
+		{18, "Structure-agnostic T1 (DS1) over packet"},
+		{20, "Structure-agnostic T3 (DS3) over packet"},
+		{21, "Nx64kbit/s Basic Service using Structure-aware"},
+		{25, "Frame Relay DLCI"},
+		{40, "Structure-agnostic E3 over packet"},
+		{41, "Octet-aligned payload for Structure-agnostic DS1 circuits"},
+		{42, "E1 Nx64kbit/s with CAS using Structure-aware"},
+		{43, "DS1 (ESF) Nx64kbit/s with CAS using Structure-aware"},
+		{44, "DS1 (SF) Nx64kbit/s with CAS using Structure-aware"},
+		{12, "Unknown (12)"},
 		{99, "Unknown (99)"}, // Unknown type
 	}
 
@@ -204,32 +219,32 @@ func TestLayer2InfoExtComm_String(t *testing.T) {
 		{
 			name: "Ethernet with C flag",
 			ec: &Layer2InfoExtComm{
-				EncapType:    EncapEthernet,
+				EncapType:    EncapEthernetTagged,
 				ControlWord:  true,
 				SequencedDel: false,
 				MTU:          1500,
 			},
-			want: "L2-Info: Encap=Ethernet (802.3), Flags=C, MTU=1500",
+			want: "L2-Info: Encap=Ethernet (VLAN) Tagged Mode, Flags=C, MTU=1500",
 		},
 		{
 			name: "VLAN with both flags",
 			ec: &Layer2InfoExtComm{
-				EncapType:    EncapVLAN,
+				EncapType:    EncapEthernetRaw,
 				ControlWord:  true,
 				SequencedDel: true,
 				MTU:          1500,
 			},
-			want: "L2-Info: Encap=VLAN (802.1Q), Flags=C,S, MTU=1500",
+			want: "L2-Info: Encap=Ethernet Raw Mode, Flags=C,S, MTU=1500",
 		},
 		{
 			name: "Ethernet with no flags",
 			ec: &Layer2InfoExtComm{
-				EncapType:    EncapEthernet,
+				EncapType:    EncapEthernetTagged,
 				ControlWord:  false,
 				SequencedDel: false,
 				MTU:          9000,
 			},
-			want: "L2-Info: Encap=Ethernet (802.3), Flags=none, MTU=9000",
+			want: "L2-Info: Encap=Ethernet (VLAN) Tagged Mode, Flags=none, MTU=9000",
 		},
 		{
 			name: "ATM AAL5 with S flag only",
@@ -239,7 +254,7 @@ func TestLayer2InfoExtComm_String(t *testing.T) {
 				SequencedDel: true,
 				MTU:          1500,
 			},
-			want: "L2-Info: Encap=ATM AAL5 VCC transport, Flags=S, MTU=1500",
+			want: "L2-Info: Encap=ATM AAL5 SDU VCC transport, Flags=S, MTU=1500",
 		},
 	}
 
@@ -424,5 +439,50 @@ func TestRouteTarget_String(t *testing.T) {
 				t.Errorf("String() = %s, want %s", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestDecodeLayer2InfoValue_FlagBits pins the Control Flags bit positions:
+// |Z|Z|Z|Z|T|R|C|S| with S in the least significant bit (RFC 4761 Section
+// 3.2.4 Figure 4; T and R added by RFC 8395 Section 2 Figure 2).
+func TestDecodeLayer2InfoValue_FlagBits(t *testing.T) {
+	tests := []struct {
+		flags      byte
+		t, r, c, s bool
+		str        string
+	}{
+		{0x00, false, false, false, false, "none"},
+		{0x01, false, false, false, true, "S"},
+		{0x02, false, false, true, false, "C"},
+		{0x04, false, true, false, false, "R"},
+		{0x08, true, false, false, false, "T"},
+		{0xff, true, true, true, true, "T,R,C,S"}, // Z bits ignored
+	}
+	for _, tt := range tests {
+		l, err := DecodeLayer2InfoValue([]byte{EncapVPLS, tt.flags, 0x05, 0xdc, 0x00, 0x00})
+		if err != nil {
+			t.Fatalf("flags 0x%02x: %v", tt.flags, err)
+		}
+		if l.FlowLabelTx != tt.t || l.FlowLabelRx != tt.r || l.ControlWord != tt.c || l.SequencedDel != tt.s {
+			t.Errorf("flags 0x%02x: got T=%t R=%t C=%t S=%t", tt.flags, l.FlowLabelTx, l.FlowLabelRx, l.ControlWord, l.SequencedDel)
+		}
+		if l.EncapType != EncapVPLS || l.MTU != 1500 {
+			t.Errorf("flags 0x%02x: got encap %d MTU %d", tt.flags, l.EncapType, l.MTU)
+		}
+		want := "L2-Info: Encap=VPLS, Flags=" + tt.str + ", MTU=1500"
+		if got := l.String(); got != want {
+			t.Errorf("String() = %s, want %s", got, want)
+		}
+	}
+}
+
+// TestDecodeLayer2InfoValue_Length: the value after Type and Sub-Type is 6
+// octets (RFC 4761 Section 3.2.4 Figure 3); other lengths are rejected
+// instead of panicking.
+func TestDecodeLayer2InfoValue_Length(t *testing.T) {
+	for _, n := range []int{0, 1, 3, 4, 5, 7, 8} {
+		if l, err := DecodeLayer2InfoValue(make([]byte, n)); err == nil || l != nil {
+			t.Errorf("len %d: got %v, %v; want nil, error", n, l, err)
+		}
 	}
 }

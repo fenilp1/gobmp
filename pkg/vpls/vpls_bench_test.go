@@ -75,7 +75,7 @@ func BenchmarkParseLayer2InfoExtComm(b *testing.B) {
 	ec := []byte{
 		0x80, 0x0a, // Type: Layer2 Info
 		0x04,       // Encap: Ethernet
-		0x01,       // Flags: C flag
+		0x02,       // Flags: C flag
 		0x05, 0xdc, // MTU: 1500
 		0x00, 0x00, // Reserved
 	}

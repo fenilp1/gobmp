@@ -63,8 +63,8 @@ func TestVPLSMessageProducer_RFC4761(t *testing.T) {
 				AttributeType: 16, // Extended Community
 				Attribute: []byte{
 					0x80, 0x0a, // Type: Layer2 Info
-					0x04,       // Encap: Ethernet
-					0x01,       // Flags: C flag
+					0x04,       // Encap: Ethernet (VLAN) Tagged Mode
+					0x02,       // Flags: C flag (RFC 4761 Figure 4)
 					0x05, 0xdc, // MTU: 1500
 					0x00, 0x00, // Reserved
 				},
@@ -123,8 +123,9 @@ func TestVPLSMessageProducer_RFC4761(t *testing.T) {
 	}
 
 	// Verify Layer2 Info Extended Community
-	if msg.EncapType == nil || *msg.EncapType != "Ethernet (802.3)" {
-		t.Errorf("EncapType = %v, want Ethernet (802.3)", msg.EncapType)
+	// IANA BGP Layer 2 Encapsulation Types (RFC 6624 Section 7): 4 = Ethernet (VLAN) Tagged Mode
+	if msg.EncapType == nil || *msg.EncapType != "Ethernet (VLAN) Tagged Mode" {
+		t.Errorf("EncapType = %v, want Ethernet (VLAN) Tagged Mode", msg.EncapType)
 	}
 	if msg.ControlWord == nil || *msg.ControlWord != true {
 		t.Errorf("ControlWord = %v, want true", msg.ControlWord)
@@ -175,7 +176,7 @@ func TestVPLSMessageProducer_RFC6074(t *testing.T) {
 				AttributeType: 16, // Extended Community
 				Attribute: []byte{
 					0x80, 0x0a, // Type: Layer2 Info
-					0x13,       // Encap: Ethernet VLAN (type 19)
+					0x13,       // Encap: VPLS (type 19)
 					0x00,       // Flags: none
 					0x05, 0xdc, // MTU: 1500
 					0x00, 0x00, // Reserved
@@ -211,8 +212,9 @@ func TestVPLSMessageProducer_RFC6074(t *testing.T) {
 	}
 
 	// Verify Layer2 Info
-	if msg.EncapType == nil || *msg.EncapType != "Ethernet VLAN (802.1Q)" {
-		t.Errorf("EncapType = %v, want Ethernet VLAN (802.1Q)", msg.EncapType)
+	// RFC 4761 Section 3.2.4: "The Encaps Type for VPLS is 19."
+	if msg.EncapType == nil || *msg.EncapType != "VPLS" {
+		t.Errorf("EncapType = %v, want VPLS", msg.EncapType)
 	}
 }
 
@@ -353,3 +355,50 @@ func (m *mockMPNLRI) GetNLRIMVPN() (*mcastvpn.Route, error)         { return m.m
 func (m *mockMPNLRI) GetNLRIRTC() (*rtc.Route, error)               { return nil, nil }
 func (m *mockMPNLRI) GetNLRIMUP() (*mup.Route, error)               { return nil, nil }
 func (m *mockMPNLRI) GetNLRIMulticast() (*base.MPNLRI, error)       { return nil, nil }
+
+// TestVPLSMessageProducer_Layer2InfoFlagBits: in the Layer2 Info Extended
+// Community Control Flags |Z|Z|Z|Z|T|R|C|S|, S is 0x01 and C is 0x02
+// (RFC 4761 Section 3.2.4 Figure 4, RFC 8395 Section 2 Figure 2).
+func TestVPLSMessageProducer_Layer2InfoFlagBits(t *testing.T) {
+	nlriBytes := []byte{
+		0x00, 0x11,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x64,
+		0x00, 0x01, 0x00, 0x00, 0x00, 0x0a, 0x18, 0x6a, 0x00,
+	}
+	vplsRoute, err := vpls.UnmarshalVPLSNLRI(nlriBytes)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal VPLS NLRI: %v", err)
+	}
+	peerHeader := attachTestIdentity(&bmp.PerPeerHeader{
+		PeerAS:            65000,
+		PeerAddress:       []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 2},
+		PeerBGPID:         []byte{10, 0, 0, 2},
+		PeerDistinguisher: make([]byte, 8),
+		PeerTimestamp:     make([]byte, 8),
+	}, "10.1.1.1", "h")
+	for _, tt := range []struct {
+		flags byte
+		c, s  bool
+	}{
+		{0x01, false, true},
+		{0x02, true, false},
+		{0x03, true, true},
+	} {
+		update := &bgp.Update{
+			BaseAttributes: &bgp.BaseAttributes{},
+			PathAttributes: []bgp.PathAttribute{{
+				AttributeType: 16,
+				Attribute:     []byte{0x80, 0x0a, 0x13, tt.flags, 0x05, 0xdc, 0x00, 0x00},
+			}},
+		}
+		p := &producer{}
+		msgs, err := p.vpls(&mockMPNLRI{vplsRoute: vplsRoute, nextHop: "10.0.0.2"}, 0, peerHeader, update)
+		if err != nil || len(msgs) != 1 {
+			t.Fatalf("vpls() = %d msgs, err %v", len(msgs), err)
+		}
+		m := msgs[0]
+		if m.ControlWord == nil || *m.ControlWord != tt.c || m.SequencedDel == nil || *m.SequencedDel != tt.s {
+			t.Errorf("flags 0x%02x: control_word=%v sequenced_delivery=%v, want %t %t", tt.flags, *m.ControlWord, *m.SequencedDel, tt.c, tt.s)
+		}
+	}
+}

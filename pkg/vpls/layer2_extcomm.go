@@ -16,7 +16,7 @@ import (
 //	+------------------------------------+
 //	|  Encapsulation Type (1 octet)      | 1-19 (see EncapType constants)
 //	+------------------------------------+
-//	|  Control Flags (1 octet)           | Bit 0: C, Bit 1: S
+//	|  Control Flags (1 octet)           | |Z|Z|Z|Z|T|R|C|S| (RFC 8395 Section 2)
 //	+------------------------------------+
 //	|  Layer-2 MTU (2 octets)            |
 //	+------------------------------------+
@@ -24,42 +24,66 @@ import (
 //	+------------------------------------+
 type Layer2InfoExtComm struct {
 	EncapType    uint8  // Encapsulation type (1-19)
+	FlowLabelTx  bool   // T flag: PE can send a flow label (RFC 8395)
+	FlowLabelRx  bool   // R flag: PE can receive a flow label (RFC 8395)
 	ControlWord  bool   // C flag: Control word required/preferred
 	SequencedDel bool   // S flag: Sequenced delivery of frames
 	MTU          uint16 // Layer-2 MTU in bytes
 }
 
-// Encapsulation Type values from RFC 4761 Section 3.2.4
+// Control Flags bits of the Layer2 Info Extended Community. Bit 7 of
+// |Z|Z|Z|Z|T|R|C|S| is the least significant (RFC 4761 Section 3.2.4
+// Figure 4, RFC 8395 Section 2 Figure 2).
 const (
-	EncapFrameRelayDLCI = 1  // Frame Relay DLCI
-	EncapATMAAL5        = 2  // ATM AAL5 VCC transport
+	Layer2FlagS uint8 = 0x01 // Sequenced delivery of frames
+	Layer2FlagC uint8 = 0x02 // Control word
+	Layer2FlagR uint8 = 0x04 // Ability to receive a flow label
+	Layer2FlagT uint8 = 0x08 // Request to send a flow label
+)
+
+// Encaps Type values from the IANA "BGP Layer 2 Encapsulation Types"
+// registry created by RFC 6624 Section 7 (initial values in Table 1 of
+// RFC 6624 Section 3). The Encaps Type for VPLS is 19 (RFC 4761 Section 3.2.4).
+const (
+	EncapFrameRelay     = 1  // Frame Relay
+	EncapATMAAL5        = 2  // ATM AAL5 SDU VCC transport
 	EncapATMTransparent = 3  // ATM transparent cell transport
-	EncapEthernet       = 4  // Ethernet (802.3)
-	EncapVLAN           = 5  // VLAN (802.1Q)
-	EncapHDLC           = 6  // HDLC
+	EncapEthernetTagged = 4  // Ethernet (VLAN) Tagged Mode
+	EncapEthernetRaw    = 5  // Ethernet Raw Mode
+	EncapHDLC           = 6  // Cisco HDLC
 	EncapPPP            = 7  // PPP
 	EncapSONETSDH       = 8  // SONET/SDH Circuit Emulation Service
 	EncapATMnto1VCC     = 9  // ATM n-to-one VCC cell transport
 	EncapATMnto1VPC     = 10 // ATM n-to-one VPC cell transport
 	EncapIPLayer2       = 11 // IP Layer 2 Transport
-	EncapEthernetVLAN   = 19 // Ethernet VLAN (802.1Q)
+	EncapVPLS           = 19 // VPLS
+
+	// Deprecated: despite its name this is Encaps Type 1, which IANA names
+	// "Frame Relay"; "Frame Relay DLCI" is Encaps Type 25. Use EncapFrameRelay.
+	EncapFrameRelayDLCI = EncapFrameRelay
+	// Deprecated: Encaps Type 4 is "Ethernet (VLAN) Tagged Mode"; use EncapEthernetTagged.
+	EncapEthernet = EncapEthernetTagged
+	// Deprecated: Encaps Type 5 is "Ethernet Raw Mode"; use EncapEthernetRaw.
+	EncapVLAN = EncapEthernetRaw
+	// Deprecated: Encaps Type 19 is "VPLS"; use EncapVPLS.
+	EncapEthernetVLAN = EncapVPLS
 )
 
 // EncapTypeToString returns human-readable encapsulation type
 func EncapTypeToString(encapType uint8) string {
 	switch encapType {
-	case EncapFrameRelayDLCI:
-		return "Frame Relay DLCI"
+	case EncapFrameRelay:
+		return "Frame Relay"
 	case EncapATMAAL5:
-		return "ATM AAL5 VCC transport"
+		return "ATM AAL5 SDU VCC transport"
 	case EncapATMTransparent:
 		return "ATM transparent cell transport"
-	case EncapEthernet:
-		return "Ethernet (802.3)"
-	case EncapVLAN:
-		return "VLAN (802.1Q)"
+	case EncapEthernetTagged:
+		return "Ethernet (VLAN) Tagged Mode"
+	case EncapEthernetRaw:
+		return "Ethernet Raw Mode"
 	case EncapHDLC:
-		return "HDLC"
+		return "Cisco HDLC"
 	case EncapPPP:
 		return "PPP"
 	case EncapSONETSDH:
@@ -70,8 +94,30 @@ func EncapTypeToString(encapType uint8) string {
 		return "ATM n-to-one VPC cell transport"
 	case EncapIPLayer2:
 		return "IP Layer 2 Transport"
-	case EncapEthernetVLAN:
-		return "Ethernet VLAN (802.1Q)"
+	case 15:
+		return "Frame Relay Port mode"
+	case 17:
+		return "Structure-agnostic E1 over packet"
+	case 18:
+		return "Structure-agnostic T1 (DS1) over packet"
+	case EncapVPLS:
+		return "VPLS"
+	case 20:
+		return "Structure-agnostic T3 (DS3) over packet"
+	case 21:
+		return "Nx64kbit/s Basic Service using Structure-aware"
+	case 25:
+		return "Frame Relay DLCI"
+	case 40:
+		return "Structure-agnostic E3 over packet"
+	case 41:
+		return "Octet-aligned payload for Structure-agnostic DS1 circuits"
+	case 42:
+		return "E1 Nx64kbit/s with CAS using Structure-aware"
+	case 43:
+		return "DS1 (ESF) Nx64kbit/s with CAS using Structure-aware"
+	case 44:
+		return "DS1 (SF) Nx64kbit/s with CAS using Structure-aware"
 	default:
 		return fmt.Sprintf("Unknown (%d)", encapType)
 	}
@@ -87,23 +133,12 @@ func ParseLayer2InfoExtComm(b []byte) (*Layer2InfoExtComm, error) {
 		return nil, fmt.Errorf("Layer2 Info Extended Community must be 8 bytes, got %d", len(b))
 	}
 
-	extComm := &Layer2InfoExtComm{}
-
 	// Byte 0-1: Type (0x800A) - should be validated by caller
 	// We skip type field and parse value starting at offset 2
-
-	// Byte 2: Encapsulation Type
-	extComm.EncapType = b[2]
-
-	// Byte 3: Control Flags
-	// Bit 0 (0x01): C flag - Control word required/preferred
-	// Bit 1 (0x02): S flag - Sequenced delivery
-	flags := b[3]
-	extComm.ControlWord = (flags & 0x01) != 0
-	extComm.SequencedDel = (flags & 0x02) != 0
-
-	// Bytes 4-5: Layer-2 MTU (2 bytes, big endian)
-	extComm.MTU = binary.BigEndian.Uint16(b[4:6])
+	extComm, err := DecodeLayer2InfoValue(b[2:])
+	if err != nil {
+		return nil, err
+	}
 
 	// Bytes 6-7: Reserved (should be 0 per RFC, but accept non-zero per robustness principle)
 	reserved := binary.BigEndian.Uint16(b[6:8])
@@ -114,23 +149,39 @@ func ParseLayer2InfoExtComm(b []byte) (*Layer2InfoExtComm, error) {
 	return extComm, nil
 }
 
+// DecodeLayer2InfoValue decodes the 6-octet value of a Layer2 Info Extended
+// Community, i.e. the octets after Type and Sub-Type: Encaps Type(1), Control
+// Flags(1), Layer-2 MTU(2), Reserved(2) (RFC 4761 Section 3.2.4). Reserved
+// is not inspected.
+func DecodeLayer2InfoValue(v []byte) (*Layer2InfoExtComm, error) {
+	if len(v) != 6 {
+		return nil, fmt.Errorf("Layer2 Info Extended Community value must be 6 bytes, got %d", len(v))
+	}
+	flags := v[1]
+	return &Layer2InfoExtComm{
+		EncapType:    v[0],
+		FlowLabelTx:  flags&Layer2FlagT != 0,
+		FlowLabelRx:  flags&Layer2FlagR != 0,
+		ControlWord:  flags&Layer2FlagC != 0,
+		SequencedDel: flags&Layer2FlagS != 0,
+		MTU:          binary.BigEndian.Uint16(v[2:4]),
+	}, nil
+}
+
 // String returns a human-readable representation of the Layer2 Info Extended Community
 func (l *Layer2InfoExtComm) String() string {
-	cFlag := "none"
-	if l.ControlWord {
-		cFlag = "C"
-	}
-	sFlag := ""
-	if l.SequencedDel {
-		if cFlag != "none" {
-			sFlag = ",S"
-		} else {
-			sFlag = "S"
-			cFlag = ""
+	flags := ""
+	for _, f := range []struct {
+		set  bool
+		name string
+	}{{l.FlowLabelTx, "T"}, {l.FlowLabelRx, "R"}, {l.ControlWord, "C"}, {l.SequencedDel, "S"}} {
+		if f.set {
+			if flags != "" {
+				flags += ","
+			}
+			flags += f.name
 		}
 	}
-
-	flags := cFlag + sFlag
 	if flags == "" {
 		flags = "none"
 	}
