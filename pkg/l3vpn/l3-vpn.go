@@ -15,7 +15,8 @@ import (
 var ErrEmptyNLRI = errors.New("NLRI length is 0")
 
 // Options gives the session and attribute context that RFC 8277 VPN NLRI
-// (AFI 1/2, SAFI 128) is decoded in.
+// (AFI 1/2, SAFI 128, and the same layout in BGP CT SAFI 76, RFC 9832 §6.1)
+// is decoded in.
 type Options struct {
 	// PathIDs says whether a 4-octet Path Identifier precedes the Length
 	// field (RFC 8277 §2.2, §2.3; RFC 7911 §3) and whether a failed parse is
