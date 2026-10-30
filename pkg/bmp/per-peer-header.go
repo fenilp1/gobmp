@@ -12,6 +12,7 @@ import (
 
 	"github.com/golang/glog"
 	"github.com/sbezverk/gobmp/pkg/base"
+	"github.com/sbezverk/gobmp/pkg/bgp"
 	"github.com/sbezverk/tools"
 )
 
@@ -310,13 +311,17 @@ type PeerIdentity struct {
 	PeerIP      string
 	PeerHash    string
 	IsLocRIB    bool
+	// LocalAS is the monitored router's AS on the session, from the Peer Up
+	// Sent OPEN (RFC 7854 Section 4.10); 0 if not known.
+	LocalAS uint32
 }
 
 func (p PeerIdentity) String() string {
 	return "SpeakerIP: " + p.SpeakerIP + ", SpeakerHash: " + p.SpeakerHash +
 		", RouterIP: " + p.RouterIP + ", RouterHash: " + p.RouterHash +
 		", PeerIP: " + p.PeerIP + ", PeerHash: " + p.PeerHash +
-		", IsLocRIB: " + strconv.FormatBool(p.IsLocRIB)
+		", IsLocRIB: " + strconv.FormatBool(p.IsLocRIB) +
+		", LocalAS: " + strconv.FormatUint(uint64(p.LocalAS), 10)
 }
 
 func (p PeerIdentity) IsEqual(other PeerIdentity) bool {
@@ -326,7 +331,8 @@ func (p PeerIdentity) IsEqual(other PeerIdentity) bool {
 		p.RouterHash == other.RouterHash &&
 		p.PeerIP == other.PeerIP &&
 		p.PeerHash == other.PeerHash &&
-		p.IsLocRIB == other.IsLocRIB
+		p.IsLocRIB == other.IsLocRIB &&
+		p.LocalAS == other.LocalAS
 }
 
 func isZeroOrEmptyIP(s string) bool {
@@ -361,6 +367,23 @@ func localAddressFromPeerUp(peerUp *PeerUpMessage) string {
 	return peerUp.GetLocalAddressString()
 }
 
+// localASFromPeerUp returns the AS of the monitored router in the Sent OPEN:
+// the 4-octet AS Number Capability's AS if present, else My AS unless it is
+// AS_TRANS (RFC 6793 Sections 3 and 4.1); 0 if not known.
+func localASFromPeerUp(peerUp *PeerUpMessage) uint32 {
+	open := peerUp.SentOpen
+	if open == nil {
+		return 0
+	}
+	if c := open.Capabilities[65]; len(c) != 0 && c[0] != nil && len(c[0].Value) == 4 {
+		return binary.BigEndian.Uint32(c[0].Value)
+	}
+	if open.MyAS == bgp.ASTrans {
+		return 0
+	}
+	return uint32(open.MyAS)
+}
+
 func identityAddress(localIP, speakerIP string) string {
 	if !isZeroOrEmptyIP(localIP) {
 		return localIP
@@ -380,6 +403,7 @@ func IdentityFromPeerUp(msg Message) PeerIdentity {
 	}
 	localIP := localAddressFromPeerUp(peerUp)
 	routerIP := identityAddress(localIP, msg.SpeakerIP)
+	id.LocalAS = localASFromPeerUp(peerUp)
 
 	if ph.PeerType == PeerType3 {
 		id.SpeakerIP = msg.SpeakerIP

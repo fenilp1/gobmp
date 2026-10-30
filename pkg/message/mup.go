@@ -88,10 +88,7 @@ func (p *producer) mup(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, update *b
 		} else {
 			prfx.IsNexthopIPv4 = !nlri.IsNextHopIPv6()
 		}
-		if ases := update.BaseAttributes.ASPath; len(ases) != 0 {
-			// Last element in AS_PATH would be the AS of the origin
-			prfx.OriginAS = ases[len(ases)-1]
-		}
+		prfx.OriginAS = originAS(operation, ph, update)
 		if rd := e.GetMUPRD(); rd != nil {
 			prfx.VPNRD = rd.String()
 			prfx.VPNRDType = rd.Type

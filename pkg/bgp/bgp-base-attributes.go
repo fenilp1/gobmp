@@ -29,12 +29,35 @@ type ASPathSegment struct {
 	ASNs []uint32 `json:"asns"`
 }
 
+// AS_PATH segment types (RFC 4271 Section 4.3, RFC 5065 Section 3).
+const (
+	asSet            = 1
+	asSequence       = 2
+	asConfedSequence = 3
+	asConfedSet      = 4
+)
+
+// ASTrans is AS_TRANS, the 2-octet placeholder for a 4-octet AS (RFC 6793
+// Section 9).
+const ASTrans = 23456
+
+// maxSegmentASNs is the most AS numbers a segment's one-octet length can
+// count (RFC 4271 Section 5.1.2).
+const maxSegmentASNs = 255
+
+func (s ASPathSegment) isConfed() bool {
+	return s.Type == asConfedSequence || s.Type == asConfedSet
+}
+
 // BaseAttributes defines a structure holding BGP's basic, non nlri based attributes,
 // codes for each can be found:
 // https://www.iana.org/assignments/bgp-parameters/bgp-parameters.xhtml#bgp-parameters-2
 type BaseAttributes struct {
-	BaseAttrHash   string          `json:"base_attr_hash,omitempty"`
-	Origin         string          `json:"origin,omitempty"`
+	BaseAttrHash string `json:"base_attr_hash,omitempty"`
+	Origin       string `json:"origin,omitempty"`
+	// ASPath, ASPathCount (the number of AS numbers in ASPath) and
+	// ASPathSegments describe the AS path information: AS_PATH, merged with
+	// AS4_PATH when RFC 6793 Section 4.2.3 applies (see unmarshalBaseAttrsFromSlice).
 	ASPath         []uint32        `json:"as_path,omitempty"`
 	ASPathCount    int32           `json:"as_path_count,omitempty"`
 	ASPathSegments []ASPathSegment `json:"as_path_segments,omitempty"`
@@ -46,14 +69,18 @@ type BaseAttributes struct {
 	CommunityList  []string        `json:"community_list,omitempty"`
 	// WellKnownCommunityList holds IANA symbolic names for any well-known
 	// communities present in CommunityList (RFC 1997 and related).
-	WellKnownCommunityList []string         `json:"well_known_community_list,omitempty"`
-	OriginatorID           string           `json:"originator_id,omitempty"`
-	ClusterList            string           `json:"cluster_list,omitempty"`
-	ExtCommunityList       []string         `json:"ext_community_list,omitempty"`
-	AS4Path                []uint32         `json:"as4_path,omitempty"`
-	AS4PathCount           int32            `json:"as4_path_count,omitempty"`
-	AS4Aggregator          []byte           `json:"as4_aggregator,omitempty"`
-	PMSITunnel             *pmsi.PMSITunnel `json:"pmsi_tunnel,omitempty"` // RFC 6514 PMSI Tunnel Attribute (Type 22)
+	WellKnownCommunityList []string `json:"well_known_community_list,omitempty"`
+	OriginatorID           string   `json:"originator_id,omitempty"`
+	ClusterList            string   `json:"cluster_list,omitempty"`
+	ExtCommunityList       []string `json:"ext_community_list,omitempty"`
+	// AS4Path, AS4PathCount and AS4Aggregator report AS4_PATH and
+	// AS4_AGGREGATOR as received after RFC 6793 Section 6 processing, whether
+	// or not AS4_PATH was merged: confederation segments are removed from
+	// AS4_PATH, and a malformed attribute is not reported.
+	AS4Path       []uint32         `json:"as4_path,omitempty"`
+	AS4PathCount  int32            `json:"as4_path_count,omitempty"`
+	AS4Aggregator []byte           `json:"as4_aggregator,omitempty"`
+	PMSITunnel    *pmsi.PMSITunnel `json:"pmsi_tunnel,omitempty"` // RFC 6514 PMSI Tunnel Attribute (Type 22)
 	// TunnelEncapAttr retains the raw RFC 9012 Tunnel Encapsulation Attribute
 	// (path attribute type 23) bytes. Exposed in JSON so downstream consumers
 	// can recover the original payload when UnmarshalTunnelEncapsulation
@@ -313,6 +340,8 @@ func UnmarshalBGPBaseAttributesWithAS4Hint(b []byte, as4 bool) (*BaseAttributes,
 func unmarshalBaseAttrsFromSlice(attrs []PathAttribute, as4hint *bool) (*BaseAttributes, error) {
 	baseAttr := BaseAttributes{}
 	dPathSeen := false
+	asPath4 := false // AS_PATH was decoded with 4-octet AS numbers
+	var as4Path []ASPathSegment
 	for _, attr := range attrs {
 		b := attr.Attribute
 		switch attr.AttributeType {
@@ -320,14 +349,14 @@ func unmarshalBaseAttrsFromSlice(attrs []PathAttribute, as4hint *bool) (*BaseAtt
 			baseAttr.Origin = unmarshalAttrOrigin(b)
 		case 2:
 			var err error
-			var segments []ASPathSegment
-			segments, err = unmarshalASPathSegments(b, as4hint)
+			if asPath4, err = asPathWidth(b, as4hint); err != nil {
+				return nil, err
+			}
+			segments, err := parseASPathSegments(b, asPath4)
 			if err != nil {
 				return nil, err
 			}
 			baseAttr.ASPathSegments = segments
-			baseAttr.ASPath = buildASPathFromSegments(segments)
-			baseAttr.ASPathCount = int32(len(baseAttr.ASPath))
 		case 3:
 			baseAttr.Nexthop = unmarshalAttrNextHop(b)
 		case 4:
@@ -362,9 +391,28 @@ func unmarshalBaseAttrsFromSlice(attrs []PathAttribute, as4hint *bool) (*BaseAtt
 		case 16:
 			baseAttr.ExtCommunityList = unmarshalAttrExtCommunity(b)
 		case 17:
-			baseAttr.AS4Path = unmarshalAttrAS4Path(b)
-			baseAttr.AS4PathCount = int32(len(baseAttr.AS4Path))
+			segments, err := unmarshalAS4PathSegments(b)
+			if err != nil {
+				// RFC 6793 Section 6: a malformed AS4_PATH is discarded.
+				glog.Warningf("discarding malformed AS4_PATH attribute: %v", err)
+				break
+			}
+			n := len(segments)
+			as4Path = slices.DeleteFunc(segments, ASPathSegment.isConfed)
+			if len(as4Path) != n {
+				// RFC 6793 Section 6: confederation segments are discarded.
+				glog.Warningf("discarding confederation segments in AS4_PATH attribute")
+			}
+			if len(as4Path) != 0 {
+				baseAttr.AS4Path = buildASPathFromSegments(as4Path)
+				baseAttr.AS4PathCount = int32(len(baseAttr.AS4Path))
+			}
 		case 18:
+			if len(b) != 8 {
+				// RFC 6793 Section 6: a malformed AS4_AGGREGATOR is discarded.
+				glog.Warningf("discarding AS4_AGGREGATOR attribute of length %d, want 8", len(b))
+				break
+			}
 			baseAttr.AS4Aggregator = unmarshalAttrAS4Aggregator(b)
 		case 19:
 			// SAFI Specific Attribute (SSA, deprecated)
@@ -519,6 +567,30 @@ func unmarshalBaseAttrsFromSlice(attrs []PathAttribute, as4hint *bool) (*BaseAtt
 			baseAttr.UnknownAttributes = append(baseAttr.UnknownAttributes, ua)
 		}
 	}
+	// Construct the AS path information from AS_PATH and AS4_PATH (RFC 6793
+	// Section 4.2.3) if AS_PATH has 2-octet AS numbers, or 4-octet ones and
+	// AS_TRANS where AS4_PATH would go: a 4-byte AS_PATH (A flag 0) does not
+	// prove a session between NEW speakers, as the BMP speaker MAY reformat a
+	// 2-octet AS_PATH into the 4-byte format and then only SHOULD NOT send
+	// AS4_PATH (RFC 7854 Section 4.2).
+	switch {
+	case baseAttr.ASPathSegments == nil || len(as4Path) == 0:
+		// No AS_PATH or no usable AS4_PATH: nothing to merge.
+	case asPath4 && !as4PathReplacesASTrans(baseAttr.ASPathSegments, as4Path):
+		// A session between NEW speakers, which do not carry AS4_PATH (RFC
+		// 6793 Section 6): AS_PATH is the AS path information.
+		if glog.V(5) {
+			glog.Infof("ignoring AS4_PATH attribute with a 4-octet AS_PATH without AS_TRANS in the part it would replace")
+		}
+	case aggregatorNotASTrans(baseAttr.Aggregator, baseAttr.AS4Aggregator, asPath4):
+		// RFC 6793 Section 4.2.3: AS_PATH is taken as the AS path information.
+	default:
+		baseAttr.ASPathSegments = mergeAS4Path(baseAttr.ASPathSegments, as4Path)
+	}
+	if baseAttr.ASPathSegments != nil {
+		baseAttr.ASPath = buildASPathFromSegments(baseAttr.ASPathSegments)
+		baseAttr.ASPathCount = int32(len(baseAttr.ASPath))
+	}
 	// Hash the raw attribute bytes directly instead of marshaling to JSON
 	h := md5.New()
 	for _, attr := range attrs {
@@ -547,6 +619,152 @@ func unmarshalAttrOrigin(b []byte) string {
 	}
 }
 
+// OriginAS returns the Route Origin ASN of RFC 6811 Section 2:
+//   - the rightmost AS of the final segment if it is an AS_SEQUENCE,
+//   - ownAS, the BGP speaker's own AS number, if the final segment is an
+//     AS_CONFED_SEQUENCE or AS_CONFED_SET or if AS_PATH is empty,
+//   - 0 (NONE) otherwise: the final segment is an AS_SET or empty, or there
+//     is no AS_PATH (as in a withdrawal).
+//
+// Pass 0 as ownAS if the speaker's AS is not known.
+func (ba *BaseAttributes) OriginAS(ownAS uint32) uint32 {
+	switch {
+	case ba.ASPathSegments == nil:
+		return 0
+	case len(ba.ASPathSegments) == 0:
+		return ownAS
+	}
+	last := ba.ASPathSegments[len(ba.ASPathSegments)-1]
+	switch {
+	case last.isConfed():
+		return ownAS
+	case last.Type == asSequence && len(last.ASNs) != 0:
+		return last.ASNs[len(last.ASNs)-1]
+	default:
+		return 0
+	}
+}
+
+// asPathLength counts AS numbers as for route selection (RFC 4271 Section
+// 9.1.2.2, RFC 5065 Section 5.3): an AS_SET counts as one, confederation
+// segments as zero.
+func asPathLength(segments []ASPathSegment) int {
+	n := 0
+	for _, seg := range segments {
+		switch seg.Type {
+		case asSequence:
+			n += len(seg.ASNs)
+		case asSet:
+			n++
+		}
+	}
+	return n
+}
+
+// as4PathReplacesASTrans reports whether the part of AS_PATH that
+// mergeAS4Path replaces with AS4_PATH, all but the leading
+// count(AS_PATH)-count(AS4_PATH) AS numbers, contains AS_TRANS. An AS_SET
+// counts as one, confederation segments as zero.
+func as4PathReplacesASTrans(asPath, as4Path []ASPathSegment) bool {
+	n := asPathLength(asPath) - asPathLength(as4Path)
+	if n < 0 {
+		return false
+	}
+	for _, seg := range asPath {
+		keep := 0
+		switch seg.Type {
+		case asSequence:
+			keep = min(n, len(seg.ASNs))
+			n -= keep
+		case asSet:
+			if n > 0 {
+				n--
+				continue
+			}
+		default:
+			continue
+		}
+		if slices.Contains(seg.ASNs[keep:], ASTrans) {
+			return true
+		}
+	}
+	return false
+}
+
+// aggregatorNotASTrans reports whether AGGREGATOR and AS4_AGGREGATOR were
+// both received and AGGREGATOR's AS is not AS_TRANS, in which case AS4_PATH
+// is ignored (RFC 6793 Section 4.2.3). AGGREGATOR is 6 octets with 2-octet
+// AS numbers and 8 with 4-octet ones; any other length is malformed and
+// treated as absent (RFC 7606 Section 7.7). A malformed AS4_AGGREGATOR was
+// already discarded.
+func aggregatorNotASTrans(aggregator, as4Aggregator []byte, as4 bool) bool {
+	switch {
+	case len(as4Aggregator) == 0:
+		return false
+	case !as4 && len(aggregator) == 6:
+		return binary.BigEndian.Uint16(aggregator) != ASTrans
+	case as4 && len(aggregator) == 8:
+		return binary.BigEndian.Uint32(aggregator) != ASTrans
+	default:
+		return false
+	}
+}
+
+// mergeAS4Path constructs the AS path information from the AS_PATH and
+// AS4_PATH of a 2-octet session (RFC 6793 Section 4.2.3). If AS_PATH counts
+// fewer AS numbers than AS4_PATH, AS_PATH is returned. Otherwise the leading
+// part of AS_PATH that counts count(AS_PATH)-count(AS4_PATH) AS numbers is
+// prepended to AS4_PATH. An AS_SEQUENCE may be split to take part of it; an
+// AS_SET counts as one and is taken whole. Confederation segments count as
+// zero and are taken while prepending, so each one taken is the leading
+// segment or adjacent to a prepended one. Adjacent AS_SEQUENCE segments of
+// the result are joined.
+func mergeAS4Path(asPath, as4Path []ASPathSegment) []ASPathSegment {
+	n := asPathLength(asPath) - asPathLength(as4Path)
+	if n < 0 {
+		return asPath
+	}
+	merged := make([]ASPathSegment, 0, len(asPath)+len(as4Path))
+prepend:
+	for _, seg := range asPath {
+		switch seg.Type {
+		case asSet:
+			if n == 0 {
+				break prepend
+			}
+			n--
+		case asSequence:
+			if n == 0 {
+				break prepend
+			}
+			if n < len(seg.ASNs) {
+				merged = append(merged, ASPathSegment{Type: asSequence, ASNs: seg.ASNs[:n:n]})
+				break prepend
+			}
+			n -= len(seg.ASNs)
+		}
+		merged = append(merged, seg)
+	}
+	return joinASSequences(append(merged, as4Path...))
+}
+
+// joinASSequences joins each AS_SEQUENCE segment to a preceding one, unless
+// the result would exceed maxSegmentASNs. The path is unchanged: a sequence
+// split across segments is the same sequence.
+func joinASSequences(segments []ASPathSegment) []ASPathSegment {
+	joined := segments[:0]
+	for _, seg := range segments {
+		if i := len(joined) - 1; i >= 0 && seg.Type == asSequence && joined[i].Type == asSequence &&
+			len(joined[i].ASNs)+len(seg.ASNs) <= maxSegmentASNs {
+			// Clip so that append copies instead of writing to a shared array.
+			joined[i].ASNs = append(slices.Clip(joined[i].ASNs), seg.ASNs...)
+			continue
+		}
+		joined = append(joined, seg)
+	}
+	return joined
+}
+
 func buildASPathFromSegments(segments []ASPathSegment) []uint32 {
 	path := make([]uint32, 0)
 	for _, seg := range segments {
@@ -560,17 +778,29 @@ func unmarshalASPathSegments(b []byte, as4hint *bool) ([]ASPathSegment, error) {
 	if len(b) == 0 {
 		return []ASPathSegment{}, nil
 	}
-	segments := make([]ASPathSegment, 0)
-	var as4 bool
-	if as4hint != nil {
-		as4 = *as4hint
-	} else {
-		var err error
-		as4, err = isASPath4(b)
-		if err != nil {
-			return nil, err
-		}
+	as4, err := asPathWidth(b, as4hint)
+	if err != nil {
+		return nil, err
 	}
+	return parseASPathSegments(b, as4)
+}
+
+// asPathWidth reports whether AS_PATH b has 4-octet AS numbers: as4hint if
+// set, else the AS_PATH width heuristic, which prefers 4 octets.
+func asPathWidth(b []byte, as4hint *bool) (bool, error) {
+	if as4hint != nil {
+		return *as4hint, nil
+	}
+	if len(b) == 0 {
+		return false, nil
+	}
+	return isASPath4(b)
+}
+
+// parseASPathSegments decodes AS_PATH-encoded segments whose AS numbers are
+// 4 octets wide if as4 is set, 2 octets otherwise.
+func parseASPathSegments(b []byte, as4 bool) ([]ASPathSegment, error) {
+	segments := make([]ASPathSegment, 0)
 	asSize := 2
 	if as4 {
 		asSize = 4
@@ -772,31 +1002,24 @@ func unmarshalAttrLgCommunity(b []byte) []string {
 	return s
 }
 
-// unmarshalAttrAS4Path returns a sequence of AS4 path segments
-func unmarshalAttrAS4Path(b []byte) []uint32 {
-	path := make([]uint32, 0, len(b)/4)
-	for p := 0; p < len(b); {
-		if p+2 > len(b) {
-			glog.Errorf("AS4_PATH truncated at segment header: offset %d, len %d", p, len(b))
-			break
-		}
-		// Segment type byte
-		p++
-		// Length of path segment in number of 4-byte ASes
-		l := int(b[p])
-		p++
-		if p+l*4 > len(b) {
-			glog.Errorf("AS4_PATH truncated: segment needs %d bytes, have %d", l*4, len(b)-p)
-			break
-		}
-		for n := 0; n < l; n++ {
-			as := binary.BigEndian.Uint32(b[p : p+4])
-			p += 4
-			path = append(path, as)
+// unmarshalAS4PathSegments decodes AS4_PATH, which has the AS_PATH encoding
+// with 4-octet AS numbers (RFC 6793 Section 3). Besides what the AS_PATH
+// decoder rejects, RFC 6793 Section 6 makes an empty attribute or a
+// zero-length segment malformed.
+func unmarshalAS4PathSegments(b []byte) ([]ASPathSegment, error) {
+	segments, err := parseASPathSegments(b, true)
+	if err != nil {
+		return nil, err
+	}
+	if len(segments) == 0 {
+		return nil, errors.New("AS4_PATH attribute is empty")
+	}
+	for _, seg := range segments {
+		if len(seg.ASNs) == 0 {
+			return nil, errors.New("AS4_PATH attribute has a zero-length segment")
 		}
 	}
-
-	return path
+	return segments, nil
 }
 
 // getAttrAS4Aggregator returns the value of AS4 AGGREGATOR attribute

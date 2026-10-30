@@ -4,6 +4,22 @@ Message updates and major project changes should be documented here.
 
 ## [Unreleased]
 
+### 2026-10-30
+
+#### Added
+
+- `BaseAttributes.OriginAS` returning the Route Origin ASN per RFC 6811 Section 2, `PeerIdentity.LocalAS` holding the monitored router's AS from the Peer Up Sent OPEN, and the `bgp.ASTrans` constant
+
+#### Fixed
+
+- `as_path`, `as_path_segments` and `origin_as` of routes from 2-octet AS sessions show the real 4-byte ASNs from AS4_PATH instead of 23456 (AS_TRANS): AS_PATH and AS4_PATH are merged per RFC 6793 Section 4.2.3, adjacent AS_SEQUENCE segments of the merged path are joined (at most 255 ASNs each) and `as_path_count` counts the merged `as_path`
+- A 4-byte AS_PATH (A flag 0) is also merged with AS4_PATH if AS_TRANS is in the part AS4_PATH replaces, as a BMP speaker may reformat a 2-octet AS_PATH into the 4-byte format per RFC 7854 Section 4.2; other 4-byte AS_PATHs are not merged
+- AS4_PATH is not merged when it counts more ASNs than AS_PATH, or when AGGREGATOR is not AS_TRANS and AS4_AGGREGATOR is present, per RFC 6793 Section 4.2.3
+- `as4_path`, `as4_path_count` and `as4_aggregator` report the attributes as received after RFC 6793 Section 6 processing, whether or not AS4_PATH is merged: confederation segments are removed from `as4_path`, and a malformed AS4_PATH or AS4_AGGREGATOR (length other than 8) is discarded and not published. They are still published from 4-octet sessions, as a monitor cannot tell whether the router's session was between NEW speakers, which RFC 6793 Section 6 says do not carry them
+- `origin_as` is omitted when the AS path ends in an AS_SET (NONE per RFC 6811 Section 2) instead of being the last ASN of the set
+- `origin_as` of a route whose AS path is empty or ends in an AS_CONFED_SEQUENCE or AS_CONFED_SET is the monitored router's own AS per RFC 6811 Section 2, instead of omitted (empty) or the last confederation ASN. Loc-RIB always uses the Peer AS (RFC 9069 Section 5.1), falling back to the Loc-RIB Peer Up Sent OPEN AS only if the Peer AS is 0. Adj-RIB-In and Adj-RIB-Out use the AS in the peer's Peer Up Sent OPEN, which on confederation sessions is the Member-AS; if no Peer Up was received for the peer, they omit `origin_as`, except that Adj-RIB-In uses the Peer AS for an empty AS path
+- Withdrawn routes omit `origin_as` instead of taking it from the AS path of the routes announced in the same UPDATE
+
 ### 2026-03-01
 
 #### Added

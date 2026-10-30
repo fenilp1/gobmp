@@ -208,7 +208,8 @@ func minimalPeerHeader() *bmp.PerPeerHeader {
 func minimalUpdate() *bgp.Update {
 	return &bgp.Update{
 		BaseAttributes: &bgp.BaseAttributes{
-			ASPath: []uint32{65000},
+			ASPath:         []uint32{65000},
+			ASPathSegments: []bgp.ASPathSegment{{Type: 2, ASNs: []uint32{65000}}},
 		},
 	}
 }

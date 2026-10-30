@@ -70,9 +70,7 @@ func (p *producer) buildFlowspecMessage(operation string, nlri bgp.MPNLRI, ph *b
 		}
 	}
 
-	if ases := update.BaseAttributes.ASPath; len(ases) != 0 {
-		fs.OriginAS = ases[len(ases)-1]
-	}
+	fs.OriginAS = originAS(operation, ph, update)
 
 	fs.Nexthop = nlri.GetNextHop()
 	fs.PeerIP = ph.GetPeerAddrString()

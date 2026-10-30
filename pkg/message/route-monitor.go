@@ -238,6 +238,51 @@ func validateNHC(update *bgp.Update, afi uint16, safi uint8, nextHop []byte, ph 
 	glog.Warningf("discarded NHC attribute whose embedded next hop did not semantically match AFI %d SAFI %d route next hop", afi, safi)
 }
 
+// originAS returns origin_as for a route in update: none for a withdrawal,
+// which has no AS path, else the Route Origin ASN of RFC 6811 Section 2.
+func originAS(operation string, ph *bmp.PerPeerHeader, update *bgp.Update) uint32 {
+	if operation != "add" {
+		return 0
+	}
+	return update.BaseAttributes.OriginAS(speakerAS(ph, update.BaseAttributes))
+}
+
+// speakerAS returns "the BGP speaker's own AS number" (RFC 6811 Section 2)
+// for the RIB a route is reported from, used as the origin of a route whose
+// AS_PATH is empty or ends in a confederation segment; 0 if not known.
+//
+// Loc-RIB: Peer AS, "the primary router BGP autonomous system number" (RFC
+// 9069 Section 5.1), or if that is 0 the AS in the fabricated Sent OPEN of
+// the Loc-RIB Peer Up (RFC 9069 Section 5.2).
+//
+// Adj-RIB-In and Adj-RIB-Out: the monitored router's AS in the Sent OPEN of
+// the peer's Peer Up (RFC 7854 Section 4.10). Peer AS is the AS of the peer
+// the route is received from (RFC 7854 Section 4.2) or sent to (RFC 8671
+// Section 4); without a Peer Up it stands in only for an empty AS_PATH on
+// Adj-RIB-In, as an empty AS_PATH is sent only to internal peers (RFC 4271
+// Section 5.1.2).
+//
+// A path ending in a confederation segment is only seen on a session inside
+// the confederation, where the router's AS is its Member-AS (RFC 5065
+// Section 4), so that is the origin reported. This is RFC 6811's "own AS
+// number" read literally; the AS Confederation Identifier, which origin
+// validation against ROAs would expect, is not available on that session.
+func speakerAS(ph *bmp.PerPeerHeader, ba *bgp.BaseAttributes) uint32 {
+	if ph.PeerType == bmp.PeerType3 {
+		if ph.PeerAS != 0 {
+			return ph.PeerAS
+		}
+		return ph.Identity.LocalAS
+	}
+	if ph.Identity.LocalAS != 0 {
+		return ph.Identity.LocalAS
+	}
+	if out, _ := ph.IsAdjRIBOut(); !out && len(ba.ASPathSegments) == 0 {
+		return ph.PeerAS
+	}
+	return 0
+}
+
 func (p *producer) marshalAndPublish(msg interface{}, msgType int, hash []byte) error {
 	ensureMessageHash(msg)
 	j, err := json.Marshal(msg)

@@ -91,10 +91,7 @@ func (p *producer) nlri(op int, ph *bmp.PerPeerHeader, update *bgp.Update) ([]*U
 			PathID:         int32(pr.PathID),
 			BaseAttributes: update.BaseAttributes,
 		}
-		if ases := update.BaseAttributes.ASPath; len(ases) != 0 {
-			// Last element in AS_PATH would be the AS of the origin
-			prfx.OriginAS = ases[len(ases)-1]
-		}
+		prfx.OriginAS = originAS(operation, ph, update)
 		prfx.IsIPv4 = true
 		// Cap IPv4 prefix lengths at 32 bits, avoiding excessive len calc
 		if prfx.PrefixLen > 32 {

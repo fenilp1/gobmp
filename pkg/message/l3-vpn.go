@@ -81,10 +81,7 @@ func (p *producer) l3vpn(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, update 
 			BaseAttributes: update.BaseAttributes,
 		}
 
-		if ases := update.BaseAttributes.ASPath; len(ases) != 0 {
-			// Last element in AS_PATH would be the AS of the origin
-			prfx.OriginAS = ases[len(ases)-1]
-		}
+		prfx.OriginAS = originAS(operation, ph, update)
 		if nlri.IsIPv6NLRI() {
 			// IPv6 specific conversions
 			prfx.IsIPv4 = false

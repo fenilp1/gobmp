@@ -42,10 +42,7 @@ func (p *producer) vpls(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, update *
 			Nexthop:        nlri.GetNextHop(),
 			BaseAttributes: update.BaseAttributes,
 		}
-		if ases := update.BaseAttributes.ASPath; len(ases) != 0 {
-			// Last element in AS_PATH would be the AS of the origin
-			prfx.OriginAS = ases[len(ases)-1]
-		}
+		prfx.OriginAS = originAS(operation, ph, update)
 
 		prfx.PeerIP = ph.GetPeerAddrString()
 		prfx.RemoteBGPID = ph.GetPeerBGPIDString()

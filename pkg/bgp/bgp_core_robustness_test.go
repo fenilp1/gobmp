@@ -1,6 +1,7 @@
 package bgp
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -96,32 +97,30 @@ func TestAddPathCapability_InvalidLength(t *testing.T) {
 	}
 }
 
-func TestUnmarshalAttrAS4Path_Truncated(t *testing.T) {
+func TestUnmarshalAS4PathSegments_Truncated(t *testing.T) {
 	// Segment type=2 (AS_SEQUENCE), length=2 ASes, but only 4 bytes of AS data (need 8)
 	b := []byte{0x02, 0x02, 0x00, 0x00, 0xFD, 0xE8}
-	path := unmarshalAttrAS4Path(b)
-	// Truncated segment is rejected entirely, no ASes appended
-	if len(path) != 0 {
-		t.Errorf("got %d ASes, want 0 (truncated segment skipped entirely)", len(path))
+	if segs, err := unmarshalAS4PathSegments(b); err == nil {
+		t.Errorf("got %v, want malformed AS4_PATH error", segs)
 	}
 }
 
-func TestUnmarshalAttrAS4Path_Valid(t *testing.T) {
+func TestUnmarshalAS4PathSegments_Valid(t *testing.T) {
 	// Segment type=2 (AS_SEQUENCE), length=2, AS 65000 + AS 65001
 	b := []byte{0x02, 0x02, 0x00, 0x00, 0xFD, 0xE8, 0x00, 0x00, 0xFD, 0xE9}
-	path := unmarshalAttrAS4Path(b)
-	if len(path) != 2 {
-		t.Fatalf("got %d ASes, want 2", len(path))
+	segs, err := unmarshalAS4PathSegments(b)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if path[0] != 65000 || path[1] != 65001 {
-		t.Errorf("got %v, want [65000, 65001]", path)
+	want := []ASPathSegment{{Type: asSequence, ASNs: []uint32{65000, 65001}}}
+	if !reflect.DeepEqual(segs, want) {
+		t.Errorf("got %v, want %v", segs, want)
 	}
 }
 
-func TestUnmarshalAttrAS4Path_TruncatedHeader(t *testing.T) {
+func TestUnmarshalAS4PathSegments_TruncatedHeader(t *testing.T) {
 	// Only 1 byte — not enough for segment header
-	path := unmarshalAttrAS4Path([]byte{0x02})
-	if len(path) != 0 {
-		t.Errorf("got %d ASes, want 0", len(path))
+	if segs, err := unmarshalAS4PathSegments([]byte{0x02}); err == nil {
+		t.Errorf("got %v, want malformed AS4_PATH error", segs)
 	}
 }

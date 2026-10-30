@@ -73,9 +73,7 @@ func (p *producer) multicast(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, upd
 		if prfx.IsLocRIB {
 			prfx.TableName = p.GetTableName(ph.GetPeerBGPIDString(), ph.GetPeerDistinguisherString())
 		}
-		if ases := update.BaseAttributes.ASPath; len(ases) != 0 {
-			prfx.OriginAS = ases[len(ases)-1]
-		}
+		prfx.OriginAS = originAS(operation, ph, update)
 		prfx.PeerIP = ph.GetPeerAddrString()
 		prfx.Nexthop = nlri.GetNextHop()
 		if nlri.IsIPv6NLRI() {
