@@ -272,11 +272,23 @@ var nonTransAS2SubTypes = map[uint8]string{
 // 0x07               Flow spec traffic-action (Use of the "Value" field is defined in the "Traffic Action Fields" registry)
 // 0x08               Flow spec redirect
 // 0x09               Flow spec traffic-remarking
+// 0x0c               Flow spec traffic-rate-packets [RFC 8955]
+// 0x0d               Flow Specification for SFC Classifiers [RFC 9015]
 var flowspecSubTypes = map[uint8]string{
 	0x6: CPFlowspecTrafficRate,
 	0x7: CPFlowspecTrafficAction,
 	0x8: CPFlowspecRedirect,
 	0x9: CPFlowspecTrafficRemarking,
+	0xc: CPFlowspecTrafficRatePackets,
+	0xd: CPFlowspecSFC,
+}
+
+// Generic Transitive Extended Community Part 2 (0x81) Sub-Types assign only
+// 0x08 (Flow spec rt-redirect IPv4 format). Part 3 (0x82) assigns 0x04, 0x08,
+// 0x84 and 0x85, of which only 0x08 (Flow spec rt-redirect AS-4octet format)
+// is flowspec (RFC 8955 Section 7.4); the others are not named here.
+var flowspecRedirectSubTypes = map[uint8]string{
+	0x8: CPFlowspecRedirect,
 }
 
 // extPair returns prefix followed by a and b in decimal, separated by a
@@ -529,9 +541,43 @@ func type80(subType uint8, value []byte) string {
 					" MTU=" + strconv.Itoa(int(l2.MTU))
 			}
 			s = tools.MessageHex(value)
+		case 0x0b:
+			// E-Tree Info Extended Community (RFC 7796 Section 6.2):
+			// MBZ(4)+Root VLAN(12), MBZ(4)+Leaf VLAN(12), Reserved(14)+P+V.
+			return ECPETreeInfo + "RootVLAN=" + strconv.Itoa(int(binary.BigEndian.Uint16(value[0:2])&0x0fff)) +
+				" LeafVLAN=" + strconv.Itoa(int(binary.BigEndian.Uint16(value[2:4])&0x0fff)) +
+				" P=" + strconv.FormatBool(value[5]&0x02 != 0) +
+				" V=" + strconv.FormatBool(value[5]&0x01 != 0)
+		case 0x0c:
+			// traffic-rate-packets (RFC 8955 Section 7.2): same encoding as
+			// traffic-rate-bytes, 2-octet id + IEEE float packets per second;
+			// negative values MUST be treated as zero.
+			rate := math.Float32frombits(binary.BigEndian.Uint32(value[2:]))
+			if !(rate > 0) {
+				rate = 0
+			}
+			s = "AS: " + strconv.Itoa(int(binary.BigEndian.Uint16(value[:2]))) + " Rate: " + strconv.FormatFloat(float64(rate), 'f', -1, 32) + " pps"
+		case 0x0d:
+			// Flow Specification for SFC Classifiers (RFC 9015 Section 7.4):
+			// SPI(3), SI(1), SFT(2).
+			s = "SPI=" + strconv.Itoa(int(value[0])<<16|int(value[1])<<8|int(value[2])) +
+				" SI=" + strconv.Itoa(int(value[3])) +
+				" SFT=" + strconv.Itoa(int(binary.BigEndian.Uint16(value[4:6])))
 		case 0x06:
-			rate := uint32(math.Float32frombits(binary.BigEndian.Uint32(value[2:]))) * 8
-			s = "AS: " + strconv.Itoa(int(binary.BigEndian.Uint16(value[:2]))) + " Rate: " + strconv.FormatUint(uint64(rate), 10) + " bps"
+			// traffic-rate-bytes (RFC 8955 Section 7.1): IEEE float bytes per
+			// second, printed as bits per second; negative values MUST be
+			// treated as zero. Rates of 2^61 B/s or more (and +Inf) saturate.
+			rate := math.Float32frombits(binary.BigEndian.Uint32(value[2:]))
+			var bps uint64
+			switch {
+			case !(rate > 0):
+				bps = 0
+			case rate >= 1<<61:
+				bps = math.MaxUint64
+			default:
+				bps = uint64(rate) * 8
+			}
+			s = "AS: " + strconv.Itoa(int(binary.BigEndian.Uint16(value[:2]))) + " Rate: " + strconv.FormatUint(bps, 10) + " bps"
 		case 0x08:
 			s = extPair("", uint64(binary.BigEndian.Uint16(value[0:2])), uint64(binary.BigEndian.Uint32(value[2:])))
 		case 0x07:
@@ -567,7 +613,7 @@ func type81(subType uint8, value []byte) string {
 	} else {
 		s = "invalid value length of " + strconv.Itoa(len(value))
 	}
-	return getSubType(flowspecSubTypes, subType) + s
+	return getSubType(flowspecRedirectSubTypes, subType) + s
 }
 
 func type82(subType uint8, value []byte) string {
@@ -583,7 +629,7 @@ func type82(subType uint8, value []byte) string {
 	} else {
 		s = "invalid value length of " + strconv.Itoa(len(value))
 	}
-	return getSubType(flowspecSubTypes, subType) + s
+	return getSubType(flowspecRedirectSubTypes, subType) + s
 }
 
 // extComm defines a map with Extended Community as a key, it return a function to process a type specific sub type.

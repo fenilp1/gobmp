@@ -226,8 +226,34 @@ func fmtType80(subType uint8, value []byte) string {
 
 	if len(value) == 6 {
 		switch subType {
+		case 0x0a:
+			f := value[1]
+			return fmt.Sprintf("%sEncaps=%d T=%t R=%t C=%t S=%t MTU=%d", ECPLayer2Info, value[0],
+				f&0x08 != 0, f&0x04 != 0, f&0x02 != 0, f&0x01 != 0, binary.BigEndian.Uint16(value[2:4]))
+		case 0x0b:
+			return fmt.Sprintf("%sRootVLAN=%d LeafVLAN=%d P=%t V=%t", ECPETreeInfo,
+				binary.BigEndian.Uint16(value[0:2])&0x0fff, binary.BigEndian.Uint16(value[2:4])&0x0fff,
+				value[5]&0x02 != 0, value[5]&0x01 != 0)
+		case 0x0c:
+			rate := math.Float32frombits(binary.BigEndian.Uint32(value[2:]))
+			if !(rate > 0) {
+				rate = 0
+			}
+			s = fmt.Sprintf("AS: %d Rate: %s pps", binary.BigEndian.Uint16(value[:2]), strconv.FormatFloat(float64(rate), 'f', -1, 32))
+		case 0x0d:
+			s = fmt.Sprintf("SPI=%d SI=%d SFT=%d", uint32(value[0])<<16|uint32(value[1])<<8|uint32(value[2]), value[3], binary.BigEndian.Uint16(value[4:6]))
 		case 0x06:
-			s = fmt.Sprintf("AS: %d Rate: %d bps", binary.BigEndian.Uint16(value[:2]), uint32(math.Float32frombits(binary.BigEndian.Uint32(value[2:])))*8)
+			rate := math.Float32frombits(binary.BigEndian.Uint32(value[2:]))
+			var bps uint64
+			switch {
+			case !(rate > 0):
+				bps = 0
+			case rate >= 1<<61:
+				bps = math.MaxUint64
+			default:
+				bps = uint64(rate) * 8
+			}
+			s = fmt.Sprintf("AS: %d Rate: %d bps", binary.BigEndian.Uint16(value[:2]), bps)
 		case 0x08:
 			s = fmt.Sprintf("%d:%d", binary.BigEndian.Uint16(value[0:2]), binary.BigEndian.Uint32(value[2:]))
 		case 0x07:
@@ -263,7 +289,7 @@ func fmtType81(subType uint8, value []byte) string {
 	} else {
 		s = fmt.Sprintf("invalid value length of %d", len(value))
 	}
-	return getSubType(flowspecSubTypes, subType) + s
+	return getSubType(flowspecRedirectSubTypes, subType) + s
 }
 
 func fmtType82(subType uint8, value []byte) string {
@@ -279,7 +305,7 @@ func fmtType82(subType uint8, value []byte) string {
 	} else {
 		s = fmt.Sprintf("invalid value length of %d", len(value))
 	}
-	return getSubType(flowspecSubTypes, subType) + s
+	return getSubType(flowspecRedirectSubTypes, subType) + s
 }
 
 // fmtExtComm is extComm as it was: a map with Extended Community as a key, it return a function to process a type specific sub type.
