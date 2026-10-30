@@ -35,6 +35,9 @@ type sessionState struct {
 	// tableInfoTLVs holds the Peer Up Information TLVs, which include the
 	// VRF/Table Name (RFC 9069 §5.2.1).
 	tableInfoTLVs []bmp.InformationalTLV
+	// families holds the NLRI types the Peer Up OPENs list in their
+	// Multiprotocol capabilities (RFC 4760 §8).
+	families map[int]bool
 	// peerUps counts the Peer Ups of a Loc-RIB's emulated peers that no
 	// Peer Down has ended yet (RFC 9069 §6.1.1).
 	peerUps int
@@ -60,6 +63,10 @@ func newSessionState(peerUp *bmp.PeerUpMessage) sessionState {
 		addPathSent: peerUp.SentOpen.AddPathSendReceive(),
 		addPathRecv: peerUp.ReceivedOpen.AddPathSendReceive(),
 		multiLabel:  make(map[int]bool),
+		families:    peerUp.SentOpen.MultiprotocolFamilies(),
+	}
+	for t := range peerUp.ReceivedOpen.MultiprotocolFamilies() {
+		s.families[t] = true
 	}
 	recv := peerUp.ReceivedOpen.MultiLabelCapability()
 	for t, capable := range peerUp.SentOpen.MultiLabelCapability() {
@@ -73,29 +80,44 @@ func newSessionState(peerUp *bmp.PeerUpMessage) sessionState {
 }
 
 // mergeLocRIB returns the state of a Loc-RIB instance conveyed by more than
-// one emulated peer, each with its own Peer Up for some address families
-// (RFC 9069 §6.1.1): the capabilities of both, and their Information TLVs
-// as an ordered set (RFC 9069 §5.2.1).
+// one emulated peer, each with its own Peer Up whose OPEN lists its address
+// families (RFC 9069 §6.1.1). The new Peer Up s sets the ADD-PATH and
+// Multiple Labels state of the families it lists, so an emulated peer
+// bounced with new capabilities (RFC 9069 §6.1.3) is not left with the old
+// ones; the other families keep the union of both. The Information TLVs of
+// both are kept as an ordered set (RFC 9069 §5.2.1).
 func mergeLocRIB(old, s sessionState) sessionState {
-	union := func(a, b map[int]uint8) map[int]uint8 {
+	addPath := func(a, b map[int]uint8) map[int]uint8 {
 		m := make(map[int]uint8, len(a)+len(b))
 		for t, v := range a {
-			m[t] |= v
+			if !s.families[t] {
+				m[t] = v
+			}
 		}
 		for t, v := range b {
 			m[t] |= v
 		}
 		return m
 	}
-	s.addPathSent = union(old.addPathSent, s.addPathSent)
-	s.addPathRecv = union(old.addPathRecv, s.addPathRecv)
+	s.addPathSent = addPath(old.addPathSent, s.addPathSent)
+	s.addPathRecv = addPath(old.addPathRecv, s.addPathRecv)
 	multiLabel := make(map[int]bool, len(old.multiLabel)+len(s.multiLabel))
-	for _, m := range []map[int]bool{old.multiLabel, s.multiLabel} {
-		for t := range m {
+	for t := range old.multiLabel {
+		if !s.families[t] {
 			multiLabel[t] = true
 		}
 	}
+	for t := range s.multiLabel {
+		multiLabel[t] = true
+	}
 	s.multiLabel = multiLabel
+	families := make(map[int]bool, len(old.families)+len(s.families))
+	for _, m := range []map[int]bool{old.families, s.families} {
+		for t := range m {
+			families[t] = true
+		}
+	}
+	s.families = families
 	tlvs := append([]bmp.InformationalTLV(nil), old.tableInfoTLVs...)
 	for _, tlv := range s.tableInfoTLVs {
 		dup := false

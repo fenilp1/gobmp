@@ -268,8 +268,9 @@ func TestLocRIBEmulatedPeers(t *testing.T) {
 	peerUp := func(afi byte, names ...string) {
 		t.Helper()
 		peerUp := buildPeerUpMessage(t, "192.168.1.1")
-		peerUp.SentOpen.Capabilities = addPathTestCaps(1, [2]byte{afi, 1})
-		peerUp.ReceivedOpen.Capabilities = addPathTestCaps(1, [2]byte{afi, 1})
+		// Each OPEN lists its address family (RFC 9069 §6.1.1).
+		peerUp.SentOpen.Capabilities = withMP(addPathTestCaps(1, [2]byte{afi, 1}), [2]byte{afi, 1})
+		peerUp.ReceivedOpen.Capabilities = withMP(addPathTestCaps(1, [2]byte{afi, 1}), [2]byte{afi, 1})
 		for _, n := range names {
 			peerUp.Information = append(peerUp.Information, bmp.InformationalTLV{InformationType: bmp.PeerUpTLVVRFTableName, Information: []byte(n)})
 		}
@@ -398,4 +399,62 @@ func TestDecodeErrorContext(t *testing.T) {
 	if err == nil || err.Error() != want {
 		t.Errorf("checkDecoded() = %v, want %s", err, want)
 	}
+}
+
+// withMP adds a Multiprotocol Extensions capability (code 1, RFC 4760 §8)
+// for each AFI/SAFI pair in afiSAFI to c and returns c.
+func withMP(c bgp.Capability, afiSAFI ...[2]byte) bgp.Capability {
+	for _, as := range afiSAFI {
+		c[1] = append(c[1], &bgp.CapabilityData{Value: []byte{0x00, as[0], 0x00, as[1]}})
+	}
+	return c
+}
+
+// TestLocRIBBounce checks that a Loc-RIB emulated peer bounced with new
+// capabilities (RFC 9069 §6.1.3) gets them for the address families its
+// OPEN lists (RFC 9069 §6.1.1), while the others keep their state. An OPEN
+// with no Multiprotocol capability lists IPv4 unicast only (RFC 4760 §8).
+func TestLocRIBBounce(t *testing.T) {
+	v4, v6 := [2]byte{1, 1}, [2]byte{2, 1}
+	for _, explicitMP := range []bool{true, false} {
+		name := "explicit Multiprotocol capability"
+		if !explicitMP {
+			name = "no Multiprotocol capability"
+		}
+		t.Run(name, func(t *testing.T) {
+			s := newSessionTest(t)
+			ph := makePeerHeader(t, bmp.PeerType3, 0x00)
+			caps := func(ap byte, as [2]byte) bgp.Capability {
+				c := bgp.Capability{}
+				if ap != 0 {
+					c = addPathTestCaps(ap, as)
+				}
+				if explicitMP || as != v4 {
+					c = withMP(c, as)
+				}
+				return c
+			}
+			s.peerUp(ph, caps(3, v4), caps(3, v4)) // A: IPv4 with ADD-PATH
+			s.peerUp(ph, caps(3, v6), caps(3, v6)) // B: IPv6 with ADD-PATH
+			s.peerDown(ph)
+			s.peerUp(ph, caps(0, v4), caps(0, v4)) // A': IPv4 without ADD-PATH
+			wantRoute(t, "IPv4 after the bounce", s.routes(ph, ctTestUpdate(t, mpTestAttr(0x0e, 1, 1, sessionV4NH, sessionV4))), "10.1.2.0", 24, 0, nil)
+			if ids, _ := s.p.nlriState(ph, bgp.NLRIMessageType(2, 1)); ids != base.PathIDPresent {
+				t.Errorf("IPv6 state %d, want present: A' does not list IPv6", ids)
+			}
+		})
+	}
+}
+
+// TestLocRIBDuplicatePeerUp checks that a repeated Peer Up, counted as one
+// more emulated peer, does not keep stale ADD-PATH state once the emulated
+// peer comes back without ADD-PATH.
+func TestLocRIBDuplicatePeerUp(t *testing.T) {
+	s := newSessionTest(t)
+	ph := makePeerHeader(t, bmp.PeerType3, 0x00)
+	s.peerUp(ph, addPathTestCaps(3, [2]byte{1, 1}), addPathTestCaps(3, [2]byte{1, 1}))
+	s.peerUp(ph, addPathTestCaps(3, [2]byte{1, 1}), addPathTestCaps(3, [2]byte{1, 1}))
+	s.peerDown(ph)
+	s.peerUp(ph, bgp.Capability{}, bgp.Capability{})
+	wantRoute(t, "IPv4 without ADD-PATH", s.routes(ph, ctTestUpdate(t, mpTestAttr(0x0e, 1, 1, sessionV4NH, sessionV4))), "10.1.2.0", 24, 0, nil)
 }

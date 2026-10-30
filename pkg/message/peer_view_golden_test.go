@@ -9,8 +9,11 @@ import (
 
 // TestRIBViewPublishedJSONGolden pins the JSON published for valid input in
 // Adj-RIB-Out (RFC 8671), Loc-RIB (RFC 9069) and with ADD-PATH negotiated in
-// one direction only (RFC 7911 §5), so per-view ADD-PATH handling is shown
-// not to change consumer output for valid input.
+// one direction only (RFC 7911 §5). The expectations were captured after the
+// per-session state change: most match the output before it, but "Loc-RIB,
+// ADD-PATH receive only" and "router Send, peer Receive: Adj-RIB-Out
+// post-policy with Path IDs" are fixes, as before it those NLRI were read
+// without Path IDs and published five bogus routes each.
 func TestRIBViewPublishedJSONGolden(t *testing.T) {
 	v4NH := []byte{192, 0, 2, 1}
 	withID := []byte{0x00, 0x00, 0x00, 0x07, 0x18, 0x0a, 0x01, 0x02} // Path ID 7, 10.1.2.0/24

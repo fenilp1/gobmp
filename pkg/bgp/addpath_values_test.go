@@ -1,6 +1,9 @@
 package bgp
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 // TestAddPathSendReceiveValues checks RFC 7911 §4: Send/Receive values other
 // than 1 (receive), 2 (send) and 3 (both) are ignored, so the AFI/SAFI counts
@@ -27,5 +30,27 @@ func TestAddPathSendReceiveValues(t *testing.T) {
 	}}
 	if got := o.AddPathSendReceive()[key]; got != 3 {
 		t.Errorf("AddPathSendReceive = %d after an ignored tuple, want 3", got)
+	}
+}
+
+// TestMultiprotocolFamilies checks the address families an OPEN lists in its
+// Multiprotocol Extensions capabilities, IPv4 unicast alone when it has none
+// (RFC 4760 §8).
+func TestMultiprotocolFamilies(t *testing.T) {
+	tests := []struct {
+		name string
+		caps Capability
+		want map[int]bool
+	}{
+		{name: "none", caps: Capability{}, want: map[int]bool{NLRIMessageType(1, 1): true}},
+		{name: "IPv6 unicast and VPNv4", caps: Capability{1: {{Value: []byte{0, 2, 0, 1}}, {Value: []byte{0, 1, 0, 128}}}},
+			want: map[int]bool{NLRIMessageType(2, 1): true, NLRIMessageType(1, 128): true}},
+		{name: "malformed only", caps: Capability{1: {{Value: []byte{0, 2, 0}}}}, want: map[int]bool{}},
+	}
+	for _, tt := range tests {
+		got := (&OpenMessage{Capabilities: tt.caps}).MultiprotocolFamilies()
+		if !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("%s: MultiprotocolFamilies() = %v, want %v", tt.name, got, tt.want)
+		}
 	}
 }
