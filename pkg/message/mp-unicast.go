@@ -78,6 +78,7 @@ func (p *producer) unicast(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, updat
 	if label {
 		psid, psidErr = update.GetAttrPrefixSID()
 	}
+	nextHop := nlri.GetNextHop()
 	for _, e := range u.NLRI {
 		prfx := &UnicastPrefix{
 			Action:         operation,
@@ -115,7 +116,7 @@ func (p *producer) unicast(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, updat
 			prfx.OriginAS = ases[len(ases)-1]
 		}
 		prfx.PeerIP = ph.GetPeerAddrString()
-		prfx.Nexthop = nlri.GetNextHop()
+		prfx.Nexthop = nextHop
 		if nlri.IsIPv6NLRI() {
 			// IPv6 specific conversions
 			prfx.IsIPv4 = false

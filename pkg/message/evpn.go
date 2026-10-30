@@ -73,6 +73,7 @@ func (p *producer) evpn(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, update *
 		return nil, fmt.Errorf("unknown operation %d", op)
 	}
 
+	nextHop := nlri.GetNextHop()
 	for _, e := range evpn.Route {
 		prfx := EVPNPrefix{
 			Action:         operation,
@@ -82,7 +83,7 @@ func (p *producer) evpn(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, update *
 			PeerHash:       ph.GetPeerHash(),
 			PeerASN:        ph.PeerAS,
 			Timestamp:      ph.GetPeerTimestamp(),
-			Nexthop:        nlri.GetNextHop(),
+			Nexthop:        nextHop,
 			BaseAttributes: update.BaseAttributes,
 		}
 		if ases := update.BaseAttributes.ASPath; len(ases) != 0 {

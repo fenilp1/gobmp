@@ -194,6 +194,8 @@ func (p *producer) attachIdentitySnapshot(msg *bmp.Message) {
 	}
 	ph := *msg.PeerHeader
 	ph.Identity = peer
+	// The peer strings go into every message of every route of msg.
+	ph.MemoizeStrings()
 	msg.PeerHeader = &ph
 }
 

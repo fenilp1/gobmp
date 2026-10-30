@@ -75,6 +75,7 @@ func (p *producer) l3vpn(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, update 
 	prfxs := make([]L3VPNPrefix, 0)
 	// The Prefix-SID attribute is the same for all routes of the UPDATE.
 	psid, psidErr := update.GetAttrPrefixSID()
+	nextHop := nlri.GetNextHop()
 	for _, e := range nlril3vpn.NLRI {
 		prfx := L3VPNPrefix{
 			Action:         operation,
@@ -85,7 +86,7 @@ func (p *producer) l3vpn(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, update 
 			RemoteBGPID:    ph.GetPeerBGPIDString(),
 			PeerASN:        ph.PeerAS,
 			Timestamp:      ph.GetPeerTimestamp(),
-			Nexthop:        nlri.GetNextHop(),
+			Nexthop:        nextHop,
 			PrefixLen:      int32(e.Length),
 			PathID:         int32(e.PathID),
 			BaseAttributes: update.BaseAttributes,
