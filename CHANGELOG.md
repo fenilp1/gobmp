@@ -6,6 +6,10 @@ Message updates and major project changes should be documented here.
 
 ### 2026-10-30
 
+#### Added
+
+- Warning log when an MP_REACH_NLRI outside Flow Specification (SAFI 133/134) carries a zero-length next hop (RFC 8955 §4 reserves that for Flow Specification); the route is still published without `nexthop`
+
 #### Fixed
 
 - Flowspec (AFI 1/2, SAFI 133) routes with a zero-length next hop (RFC 8955 §4) no longer publish `"nexthop":"invalid next hop address length: 0"`; the `nexthop` field is now omitted for any MP_REACH_NLRI with next hop length 0

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/golang/glog"
 )
 
 // ---------------------------------------------------------------------------
@@ -831,5 +833,34 @@ func TestMPReachNLRI_GetNLRI72_WrongSAFI(t *testing.T) {
 	notFound := &NLRINotFoundError{}
 	if !errors.As(err, &notFound) {
 		t.Fatalf("GetNLRI72() with SAFI=71: expected NLRINotFoundError, got %T: %v", err, err)
+	}
+}
+
+// TestUnmarshalMPReachNLRI_ZeroLengthNextHopWarning: a zero-length next hop
+// is expected only for Flow Specification SAFI 133/134 (RFC 8955 §4); other
+// families log a warning and still decode with an empty next hop.
+func TestUnmarshalMPReachNLRI_ZeroLengthNextHopWarning(t *testing.T) {
+	tests := []struct {
+		safi byte
+		warn bool
+	}{
+		{1, true},
+		{128, true},
+		{133, false},
+		{134, false},
+	}
+	for _, tt := range tests {
+		before := glog.Stats.Warning.Lines()
+		// AFI 1, SAFI, NH len 0, Reserved, no NLRI
+		mp, err := UnmarshalMPReachNLRI([]byte{0x00, 0x01, tt.safi, 0x00, 0x00}, false, map[int]bool{})
+		if err != nil {
+			t.Fatalf("SAFI %d: UnmarshalMPReachNLRI: %v", tt.safi, err)
+		}
+		if nh := mp.GetNextHop(); nh != "" {
+			t.Errorf("SAFI %d: GetNextHop() = %q, want empty", tt.safi, nh)
+		}
+		if got := glog.Stats.Warning.Lines() > before; got != tt.warn {
+			t.Errorf("SAFI %d: warning logged = %t, want %t", tt.safi, got, tt.warn)
+		}
 	}
 }

@@ -327,6 +327,10 @@ func UnmarshalMPReachNLRI(b []byte, srv6 bool, addPath map[int]bool) (MPNLRI, er
 	}
 	mp.NextHopAddressLength = uint8(b[p])
 	p++
+	// Only Flow Specification (SAFI 133/134) advertises a zero-length next hop (RFC 8955 §4).
+	if mp.NextHopAddressLength == 0 && mp.SubAddressFamilyID != 133 && mp.SubAddressFamilyID != 134 {
+		glog.Warningf("MP_REACH_NLRI AFI %d SAFI %d carries a zero-length next hop; nexthop left empty", mp.AddressFamilyID, mp.SubAddressFamilyID)
+	}
 	if p+int(mp.NextHopAddressLength) > len(b) {
 		return nil, fmt.Errorf("not enough bytes to unmarshal MP_REACH_NLRI: need %d bytes for Next Hop Address, have %d", mp.NextHopAddressLength, len(b)-p)
 	}
