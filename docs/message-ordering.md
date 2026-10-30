@@ -35,9 +35,10 @@ backpressure instead of creating a goroutine for every frame; throughput for a
 single busy connection may consequently differ. No throughput improvement is
 claimed.
 
-On EOF, connection error or server stop, the connection worker closes its parser
-input and waits for it to drain, then closes producer input and waits for its
-publication calls to finish. A complete frame handed to the parser is accepted.
+On EOF, connection error or server stop, the connection worker closes the
+router's connection, so a router or active-mode redial need not wait for a slow
+publisher, then closes its parser input and waits for it to drain, then closes
+producer input and waits for its publication calls to finish. A complete frame handed to the parser is accepted.
 All resulting valid messages finish their local publication calls before the
 worker returns; the server waits for every worker before calling publisher.Stop.
 Malformed/unsupported frames and parsed traffic before the first valid Peer Up

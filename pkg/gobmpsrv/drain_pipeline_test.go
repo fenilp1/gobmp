@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/sbezverk/gobmp/pkg/bmp"
 )
@@ -151,4 +154,60 @@ func TestBMPWorkerDrainsAcceptedFramesBeforePublisherStop(t *testing.T) {
 			})
 		}
 	}
+}
+
+// blockingPublisher blocks every publication until release is closed.
+type blockingPublisher struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (p *blockingPublisher) PublishMessage(int, []byte, []byte) error {
+	p.once.Do(func() { close(p.started) })
+	<-p.release
+	return nil
+}
+
+func (p *blockingPublisher) Stop() {}
+
+// After a protocol error the router's connection is closed at once, not only
+// once the accepted frames have drained through a slow publisher, so an
+// active-mode collector can redial meanwhile.
+func TestBMPWorkerClosesConnectionBeforeDraining(t *testing.T) {
+	pub := &blockingPublisher{started: make(chan struct{}), release: make(chan struct{})}
+	server, client := net.Pipe()
+	defer func() { _ = client.Close() }()
+	srv := &bmpServer{publisher: pub}
+	done := workerDone(srv, wrapAddr(server, "192.0.2.1:5000"))
+	defer func() { assertWorkerExits(t, done) }()
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(pub.release) }) }
+	defer release()
+
+	// A valid Peer Down, whose publication blocks, then a Peer Down header
+	// with no payload, which ends the connection as malformed.
+	go func() {
+		_, _ = client.Write(orderBMPFrame(bmp.PeerDownMsg, 1, []byte{4}))
+		_, _ = client.Write([]byte{3, 0, 0, 0, bmp.CommonHeaderLength, bmp.PeerDownMsg})
+	}()
+	select {
+	case <-pub.started:
+	case <-time.After(time.Second):
+		t.Fatal("the Peer Down was not published")
+	}
+	read := make(chan error, 1)
+	go func() {
+		_, err := client.Read(make([]byte, 1))
+		read <- err
+	}()
+	select {
+	case err := <-read:
+		if !errors.Is(err, io.EOF) {
+			t.Fatalf("client read error = %v, want EOF", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("the connection was still open after 1s while the publisher was blocked")
+	}
+	release()
 }

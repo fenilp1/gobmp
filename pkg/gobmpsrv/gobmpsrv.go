@@ -265,6 +265,10 @@ func (srv *bmpServer) bmpWorker(client net.Conn) {
 		p.Start()
 	}()
 	defer func() {
+		// The parser and producer no longer need the socket: close it first,
+		// so the router sees the connection end (and an active-mode collector
+		// can redial) while a slow publisher drains.
+		_ = client.Close()
 		// Drain accepted frames before the worker releases its server wait-group
 		// slot, so publisher.Stop cannot race with this connection's publication.
 		close(parserQueue)
