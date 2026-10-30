@@ -12,6 +12,8 @@ Message updates and major project changes should be documented here.
 - Layer2 Info Extended Community (type 0x80, sub-type 0x0a, RFC 4761 §3.2.4) is decoded: `80 0a 13 00 05 dc 00 00` reads `layer2-info=Encaps=19 T=false R=false C=false S=false MTU=1500` instead of `Subtype unknown=[ 0x13, 0x00, 0x05, 0xDC, 0x00, 0x00 ]`
 
 #### Changed
+- **Breaking:** `srpolicy.SRV6STLV` changes from 255 to 20 and `srpolicy.POLICYNAMESTLV` from 254 to 130 (RFC 9830 §6.3; the old values were placeholders)
+- An SRv6 Binding SID sub-TLV (20) whose length is not 18 or 26 (RFC 9830 §2.4.3) makes the SR Policy update malformed: no SR Policy message is published for it, as for a malformed Binding SID sub-TLV (13), following the treat-as-withdraw rule of RFC 9830 §5
 
 - **Breaking:** published VPLS `encap_type` strings change to the IANA names (see Fixed); consumers matching on the old strings (`Ethernet (802.3)`, `VLAN (802.1Q)`, `Ethernet VLAN (802.1Q)`, `Frame Relay DLCI` for type 1, `HDLC`) must update
 - **Breaking:** VPLS `control_word` / `sequenced_delivery` values change for every route whose Layer2 Info flags have only one of C or S set (see Fixed)
@@ -22,6 +24,8 @@ Message updates and major project changes should be documented here.
 - `vpls.EncapFrameRelayDLCI`, `EncapEthernet`, `EncapVLAN` and `EncapEthernetVLAN` (misnamed Encaps Types 1, 4, 5 and 19); use `EncapFrameRelay`, `EncapEthernetTagged`, `EncapEthernetRaw` and `EncapVPLS`
 
 #### Fixed
+- SR Policy `policy_path_name` (Candidate Path Name sub-TLV 129) no longer starts with the RESERVED octet: RFC 9830 §2.4.7 puts 1 RESERVED octet before the name, so an RFC-encoded name `main` reads `"main"` instead of `"\u0000main"`
+- SR Policy single-instance sub-TLVs follow RFC 9830 §2.4 ("only the first instance ... is used: the other instances MUST be ignored and MUST NOT considered to be malformed"): a repeated Preference (12), Binding SID (13), Priority (15), Candidate Path Name (129) or SR Policy Name (130) no longer overwrites the first one, and a repeated ENLP (14) or segment-list Weight no longer fails the whole SR Policy update (no message was published before)
 
 - VPLS `encap_type` (and `vpls.EncapTypeToString`) now uses the IANA BGP Layer 2 Encapsulation Types names (RFC 6624 §7): 19 reads `VPLS` (was `Ethernet VLAN (802.1Q)`), 4 `Ethernet (VLAN) Tagged Mode` (was `Ethernet (802.3)`), 5 `Ethernet Raw Mode` (was `VLAN (802.1Q)`), 1 `Frame Relay` (was `Frame Relay DLCI`), 2 `ATM AAL5 SDU VCC transport` (was `ATM AAL5 VCC transport`), 6 `Cisco HDLC` (was `HDLC`); 15, 17, 18, 20, 21, 25 (`Frame Relay DLCI`) and 40–44 are now named instead of `Unknown (N)`
 - VPLS `control_word` and `sequenced_delivery` were swapped: Layer2 Info Control Flags are `|Z|Z|Z|Z|T|R|C|S|` (RFC 4761 §3.2.4 Fig. 4, RFC 8395 §2), so flags `0x01` now publish `sequenced_delivery:true` (was `control_word:true`) and `0x02` publish `control_word:true` (was `sequenced_delivery:true`)
@@ -29,6 +33,7 @@ Message updates and major project changes should be documented here.
 - Extended communities of type 0x81 and 0x82 with sub-types other than 0x08 no longer borrow type 0x80 flowspec names (e.g. `81 06 ...` printed `flowspec-traffic-rate=[ ... ]`); per the IANA Generic Transitive Part 2/Part 3 registries they print `Subtype unknown=[ ... ]`
 - Flowspec traffic-rate-bytes (type 0x80, sub-type 0x06) with a negative rate is treated as zero (RFC 8955 §7.1): `80 06 00 00 c4 7a 00 00` (-1000) reads `flowspec-traffic-rate=AS: 0 Rate: 0 bps` instead of `Rate: 4294959296 bps`; non-negative rates print as before
 - Flowspec traffic-rate-bytes (type 0x80, sub-type 0x06) no longer wraps above 536,870,880 B/s (≈4.3 Gbit/s): the bps value is computed in 64 bits, so a 10G policer (1.25e9 B/s) reads `Rate: 10000000000 bps` instead of `Rate: 1410065408 bps`; rates of 2^61 B/s or more and +Inf read 18446744073709551615; lower rates print as before
+- SR Policy sub-TLVs 130 (SR Policy Name, RFC 9830 §2.4.8) and 20 (SRv6 Binding SID, RFC 9830 §2.4.3) are decoded instead of skipped as "not supported": `policy_name` is populated, and a new `srv6_binding_sid` array carries `flags`, `srv6_bsid` and the optional 8-octet `srv6_endpoint_behavior`
 
 ### 2026-03-01
 

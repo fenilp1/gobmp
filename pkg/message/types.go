@@ -825,6 +825,9 @@ type SRPolicy struct {
 	IsLocRIB         bool   `json:"is_loc_rib"`
 	IsLocRIBFiltered bool   `json:"is_loc_rib_filtered"`
 	TableName        string `json:"table_name,omitempty"` // RFC 9069 Table Name for LocRIB
+
+	// SRv6BSID carries SRv6 Binding SID sub-TLVs (type 20, RFC 9830 Section 2.4.3)
+	SRv6BSID []*srpolicy.SRv6BindingSID `json:"srv6_binding_sid,omitempty"`
 }
 
 // Flowspec defines the structure of SR Policy message

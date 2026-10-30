@@ -1,7 +1,9 @@
 package message
 
 import (
+	"encoding/json"
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/sbezverk/gobmp/pkg/base"
@@ -441,5 +443,36 @@ func TestEVPN_EoR_LocRIB(t *testing.T) {
 	}
 	if msgs[0].TableName != "VRF-EVPN-EoR" {
 		t.Errorf("TableName = %q, want %q", msgs[0].TableName, "VRF-EVPN-EoR")
+	}
+}
+
+// TestSRPolicy_PolicyNameAndSRv6BSID: SR Policy Name (sub-TLV 130, RFC 9830
+// Section 2.4.8) is published as policy_name, Candidate Path Name (129,
+// Section 2.4.7) as policy_path_name, and SRv6 Binding SID (20, Section
+// 2.4.3) as srv6_binding_sid.
+func TestSRPolicy_PolicyNameAndSRv6BSID(t *testing.T) {
+	p := NewProducer(&mockPublisher{}, false).(*producer)
+	ph := makePeerHeader(t, bmp.PeerType0, 0x00)
+	attr := []byte{
+		0x00, 0x0f, 0x00, 0x23, // Tunnel Type 15, Length 35
+		0x82, 0x00, 0x05, 0x00, 'r', 'e', 'd', '1', // 130: RESERVED, "red1"
+		0x81, 0x00, 0x04, 0x00, 'c', 'p', '1', // 129: RESERVED, "cp1"
+		0x14, 0x12, 0x80, 0x00, // 20: Length 18, Flags S, RESERVED
+		0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01,
+	}
+	update := &bgp.Update{BaseAttributes: &bgp.BaseAttributes{TunnelEncapAttr: attr}}
+	nlri := &mockMPNLRI{srpolicyRoute: &srpolicy.NLRI73{Endpoint: []byte{10, 0, 0, 1}}}
+	msgs, err := p.srpolicy(nlri, 0, ph, update)
+	if err != nil {
+		t.Fatalf("srpolicy() error: %v", err)
+	}
+	b, err := json.Marshal(msgs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"policy_name":"red1"`, `"policy_path_name":"cp1"`, `"srv6_binding_sid":[{"flags":128,"srv6_bsid":"IAENuAAAAAAAAAAAAAAAAQ=="}]`} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("JSON missing %s: %s", want, b)
+		}
 	}
 }

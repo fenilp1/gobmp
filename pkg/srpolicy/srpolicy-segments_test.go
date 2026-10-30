@@ -4028,13 +4028,6 @@ func TestUnmarshalSegmentListSTLV_Weight_ErrorPaths(t *testing.T) {
 			name:  "Weight insufficient data",
 			input: []byte{0x09, 0x06, 0x00, 0x00}, // length=6 but only 2 bytes of data
 		},
-		{
-			name: "Duplicate Weight",
-			input: []byte{
-				0x09, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x64, // first Weight
-				0x09, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC8, // second Weight (duplicate)
-			},
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -4475,3 +4468,18 @@ func TestTypeASegment_JSONRoundTrip(t *testing.T) {
 	}
 }
 
+// TestUnmarshalSegmentListSTLV_DuplicateWeight: Weight is single-instance
+// (RFC 9830 Section 2.4.4.1); per Section 2.4 only the first is used and the
+// rest MUST be ignored and are not malformed.
+func TestUnmarshalSegmentListSTLV_DuplicateWeight(t *testing.T) {
+	sl, err := UnmarshalSegmentListSTLV([]byte{
+		0x09, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x64, // first Weight 100
+		0x09, 0x02, 0x00, 0x00, // second Weight, bad length, ignored
+	})
+	if err != nil {
+		t.Fatalf("UnmarshalSegmentListSTLV() error = %v", err)
+	}
+	if sl.Weight == nil || sl.Weight.Weight != 100 {
+		t.Errorf("Weight = %+v, want first instance (100)", sl.Weight)
+	}
+}

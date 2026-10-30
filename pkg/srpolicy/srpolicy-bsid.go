@@ -292,3 +292,39 @@ func UnmarshalBSIDSTLV(b []byte) (BSID, error) {
 
 	return bsid, nil
 }
+
+// SRv6 Binding SID sub-TLV flags |S|I|B| (RFC 9830 Section 2.4.3 Figure 8).
+const (
+	SRv6BSIDFlagS byte = 0x80 // Specified-BSID-Only
+	SRv6BSIDFlagI byte = 0x40 // Drop-Upon-Invalid
+	SRv6BSIDFlagB byte = 0x20 // SRv6 Endpoint Behavior and SID Structure present
+)
+
+// SRv6BindingSID is the SRv6 Binding SID sub-TLV (type 20, RFC 9830
+// Section 2.4.3): Flags(1), RESERVED(1), SRv6 Binding SID(16) and an optional
+// 8-octet SRv6 Endpoint Behavior and SID Structure (Section 2.4.4.2.4).
+type SRv6BindingSID struct {
+	Flags            byte   `json:"flags,omitempty"`
+	BSID             []byte `json:"srv6_bsid"`
+	EndpointBehavior []byte `json:"srv6_endpoint_behavior,omitempty"`
+}
+
+// UnmarshalSRv6BindingSIDSTLV decodes the value of an SRv6 Binding SID
+// sub-TLV, whose length MUST be 18, or 26 when the SRv6 Endpoint Behavior
+// and SID Structure is present (RFC 9830 Section 2.4.3).
+func UnmarshalSRv6BindingSIDSTLV(b []byte) (*SRv6BindingSID, error) {
+	if glog.V(5) {
+		glog.Infof("SR Policy SRv6 Binding SID STLV Raw: %s", tools.MessageHex(b))
+	}
+	if len(b) != 18 && len(b) != 26 {
+		return nil, fmt.Errorf("invalid length of srv6 binding sid stlv: %d, expected 18 or 26", len(b))
+	}
+	s := &SRv6BindingSID{
+		Flags: b[0],
+		BSID:  append([]byte(nil), b[2:18]...),
+	}
+	if len(b) == 26 {
+		s.EndpointBehavior = append([]byte(nil), b[18:26]...)
+	}
+	return s, nil
+}
