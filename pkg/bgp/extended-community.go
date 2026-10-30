@@ -271,11 +271,15 @@ var nonTransAS2SubTypes = map[uint8]string{
 // 0x07               Flow spec traffic-action (Use of the "Value" field is defined in the "Traffic Action Fields" registry)
 // 0x08               Flow spec redirect
 // 0x09               Flow spec traffic-remarking
+// 0x0c               Flow spec traffic-rate-packets [RFC 8955]
+// 0x0d               Flow Specification for SFC Classifiers [RFC 9015]
 var flowspecSubTypes = map[uint8]string{
 	0x6: CPFlowspecTrafficRate,
 	0x7: CPFlowspecTrafficAction,
 	0x8: CPFlowspecRedirect,
 	0x9: CPFlowspecTrafficRemarking,
+	0xc: CPFlowspecTrafficRatePackets,
+	0xd: CPFlowspecSFC,
 }
 
 func getSubType(m map[uint8]string, subType uint8) string {
@@ -496,6 +500,28 @@ func type80(subType uint8, value []byte) string {
 
 	if len(value) == 6 {
 		switch subType {
+		case 0x0b:
+			// E-Tree Info Extended Community (RFC 7796 Section 6.2):
+			// MBZ(4)+Root VLAN(12), MBZ(4)+Leaf VLAN(12), Reserved(14)+P+V.
+			return ECPETreeInfo + "RootVLAN=" + strconv.Itoa(int(binary.BigEndian.Uint16(value[0:2])&0x0fff)) +
+				" LeafVLAN=" + strconv.Itoa(int(binary.BigEndian.Uint16(value[2:4])&0x0fff)) +
+				" P=" + strconv.FormatBool(value[5]&0x02 != 0) +
+				" V=" + strconv.FormatBool(value[5]&0x01 != 0)
+		case 0x0c:
+			// traffic-rate-packets (RFC 8955 Section 7.2): same encoding as
+			// traffic-rate-bytes, 2-octet id + IEEE float packets per second;
+			// negative values MUST be treated as zero.
+			rate := math.Float32frombits(binary.BigEndian.Uint32(value[2:]))
+			if !(rate > 0) {
+				rate = 0
+			}
+			s = "AS: " + strconv.Itoa(int(binary.BigEndian.Uint16(value[:2]))) + " Rate: " + strconv.FormatFloat(float64(rate), 'f', -1, 32) + " pps"
+		case 0x0d:
+			// Flow Specification for SFC Classifiers (RFC 9015 Section 7.4):
+			// SPI(3), SI(1), SFT(2).
+			s = "SPI=" + strconv.Itoa(int(value[0])<<16|int(value[1])<<8|int(value[2])) +
+				" SI=" + strconv.Itoa(int(value[3])) +
+				" SFT=" + strconv.Itoa(int(binary.BigEndian.Uint16(value[4:6])))
 		case 0x06:
 			s = fmt.Sprintf("AS: %d Rate: %d bps", binary.BigEndian.Uint16(value[:2]), uint32(math.Float32frombits(binary.BigEndian.Uint32(value[2:])))*8)
 		case 0x08:

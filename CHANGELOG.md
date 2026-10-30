@@ -4,6 +4,12 @@ Message updates and major project changes should be documented here.
 
 ## [Unreleased]
 
+### 2026-10-30
+
+#### Added
+
+- Generic Transitive extended community (type 0x80) sub-types 0x0b, 0x0c and 0x0d are decoded instead of printing `Subtype unknown=[ ... ]`: E-Tree Info (RFC 7796 §6.2) reads `e-tree-info=RootVLAN=100 LeafVLAN=200 P=true V=true`, traffic-rate-packets (RFC 8955 §7.2) reads `flowspec-traffic-rate-packets=AS: 65000 Rate: 1000 pps` (fractional rates kept, negative or NaN read 0), SFC Classifiers (RFC 9015 §7.4) reads `flowspec-sfc=SPI=256 SI=255 SFT=2`
+
 ### 2026-03-01
 
 #### Added
