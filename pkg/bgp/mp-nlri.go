@@ -30,10 +30,14 @@ type MPNLRI interface {
 	GetNLRIMVPN() (*mcastvpn.Route, error)
 	GetNLRIRTC() (*rtc.Route, error)
 	GetNLRIMUP() (*mup.Route, error)
+	GetNLRICT() (*base.MPNLRI, error)
 	GetNextHop() string
 	IsIPv6NLRI() bool
 	IsNextHopIPv6() bool
 }
+
+// SAFIClassfulTransport is the BGP Classful Transport SAFI (RFC 9832 §13.1).
+const SAFIClassfulTransport uint8 = 76
 
 // NLRIMessageType return NLRI Type code based on AFI/SAFI parameters,
 // if AFI/SAFI is unknown it will return 0
@@ -120,6 +124,12 @@ func NLRIMessageType(afi uint16, safi uint8) int {
 		// AFI 2 and SAFI 85 BGP-MUP v6
 	case afi == 2 && safi == mup.SAFI:
 		return 37
+		// AFI 1 and SAFI 76 BGP Classful Transport v4 (RFC 9832 §6)
+	case afi == 1 && safi == SAFIClassfulTransport:
+		return 38
+		// AFI 2 and SAFI 76 BGP Classful Transport v6 (RFC 9832 §6)
+	case afi == 2 && safi == SAFIClassfulTransport:
+		return 39
 	}
 
 	return 0

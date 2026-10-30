@@ -47,6 +47,7 @@ func (m *safi72MockNLRI) GetNLRIMCASTVPN() (*mcastvpn.Route, error) { return nil
 func (m *safi72MockNLRI) GetNLRIMVPN() (*mcastvpn.Route, error)     { return nil, nil }
 func (m *safi72MockNLRI) GetNLRIRTC() (*rtc.Route, error)           { return nil, nil }
 func (m *safi72MockNLRI) GetNLRIMUP() (*mup.Route, error)           { return nil, nil }
+func (m *safi72MockNLRI) GetNLRICT() (*base.MPNLRI, error)          { return nil, nil }
 func (m *safi72MockNLRI) GetNextHop() string                        { return "" }
 func (m *safi72MockNLRI) IsIPv6NLRI() bool                          { return false }
 func (m *safi72MockNLRI) IsNextHopIPv6() bool                       { return false }

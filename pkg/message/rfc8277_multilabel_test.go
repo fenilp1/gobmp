@@ -14,7 +14,8 @@ import (
 // later Route Monitoring messages. Confirmed (both OPENs list it): labels
 // are read by the S bit only. Known absent: exactly one label with the S bit
 // ignored (RFC 8277 §2.2), then the S bit walk if that is invalid. Unknown
-// (no Peer Up seen): the S bit walk, then one label.
+// (no Peer Up seen): the S bit walk, then one label. L3VPN and BGP CT share
+// the decoder, so both are checked.
 func TestMultiLabelCapabilityFromPeerUp(t *testing.T) {
 	rd := []byte{0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x01} // RD 100:1
 	cat := func(parts ...[]byte) []byte {
@@ -62,6 +63,10 @@ func TestMultiLabelCapabilityFromPeerUp(t *testing.T) {
 		// RFC 8277 §2.2: 0x000000 and 0x800000 on an announcement are labels.
 		{name: "L3VPN label 0x000000", noPeerUp: true, afi: 1, safi: 128, nlri: cat([]byte{0x78, 0x00, 0x00, 0x00}, rd, v4Prefix), wantType: bmp.L3VPNMsg, wantLabels: []uint32{0}, wantPrefix: "10.0.0.1"},
 		{name: "L3VPN label 0x800000", noPeerUp: true, afi: 1, safi: 128, nlri: cat([]byte{0x78, 0x80, 0x00, 0x00}, rd, v4Prefix), wantType: bmp.L3VPNMsg, wantLabels: []uint32{0x80000}, wantPrefix: "10.0.0.1"},
+		{name: "BGP CT confirmed", sent: mlCap(1, 76), recv: mlCap(1, 76), afi: 1, safi: 76, nlri: twoLabels, wantType: bmp.ClassfulTransportMsg, wantLabels: []uint32{100, 200}, wantPrefix: "10.0.0.1"},
+		{name: "BGP CT label-like RD, capability absent", sent: none, recv: none, afi: 1, safi: 76, nlri: labelLikeRD, wantType: bmp.ClassfulTransportMsg, wantLabels: []uint32{1000}, wantPrefix: "10.0.0.1", wantRD: "256:1"},
+		{name: "BGP CT S=0 without capability", sent: none, recv: none, afi: 1, safi: 76, nlri: oneLabelS0, wantType: bmp.ClassfulTransportMsg, wantLabels: []uint32{1000}, wantPrefix: "10.0.0.1"},
+		{name: "BGP CT label 0x800000", noPeerUp: true, afi: 1, safi: 76, nlri: cat([]byte{0x78, 0x80, 0x00, 0x00}, rd, v4Prefix), wantType: bmp.ClassfulTransportMsg, wantLabels: []uint32{0x80000}, wantPrefix: "10.0.0.1"},
 		// A confirmed capability never falls back to a single label.
 		{name: "L3VPN S=0 with capability confirmed", sent: mlCap(1, 128), recv: mlCap(1, 128), afi: 1, safi: 128, nlri: oneLabelS0, wantType: bmp.L3VPNMsg},
 	}

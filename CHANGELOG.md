@@ -8,6 +8,11 @@ Message updates and major project changes should be documented here.
 
 #### Added
 
+- BGP Classful Transport (AFI 1/2, SAFI 76, RFC 9832), reusing the L3VPN NLRI decoder, published to the new topics
+  `gobmp.parsed.bgp_ct_v4` and `gobmp.parsed.bgp_ct_v6` (`gobmp.parsed.bgp_ct` with `--split-af=false`); deployments that
+  pre-create topics must add them
+- Transport Class Route Target extended communities (RFC 9832 §4.3) render as `transport-target=` and
+  `nt-transport-target=`, and BGP CT routes publish their Transport Class IDs as `transport_class_ids`
 - `l3vpn.UnmarshalL3VPNNLRIWithOptions` decodes VPN NLRI per `l3vpn.Options`; `UnmarshalL3VPNNLRI` now wraps it
 - `unicast.UnmarshalLUNLRIWithOptions` decodes labeled unicast NLRI per `unicast.Options`; `UnmarshalLUNLRI` now wraps it
 - `base.PathIDState` and state-based decoders `bgp.UnmarshalMPReachNLRIWithState`, `bgp.UnmarshalMPUnReachNLRIWithState`,
@@ -18,6 +23,7 @@ Message updates and major project changes should be documented here.
 
 #### Changed
 
+- The `bgp.MPNLRI` interface gains `GetNLRICT`; implementations outside gobmp must add it
 - L3VPN announcements with label field 0x800000 or 0x000000 publish label 524288 or 0 (RFC 8277 §2.2), not none: new hashes
 - L3VPN IPv4 prefixes over 32 bits are dropped as malformed (RFC 8277 §2.2) instead of capped at /32
 - Labeled unicast (SAFI 4) announcements with label 0x800000 publish label 524288 (RFC 8277 §2.2), not none: new hashes

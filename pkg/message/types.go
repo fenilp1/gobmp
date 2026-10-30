@@ -555,6 +555,17 @@ type L3VPNPrefix struct {
 	TableName        string `json:"table_name,omitempty"` // RFC 9069 Table Name for LocRIB
 }
 
+// ClassfulTransportPrefix defines a BGP Classful Transport route (AFI 1/2,
+// SAFI 76, RFC 9832). The NLRI layout matches L3VPN (RFC 9832 §6.1), so the
+// L3VPNPrefix fields are embedded and serialized at the top level, with
+// vpn_rd holding the route's RD.
+type ClassfulTransportPrefix struct {
+	L3VPNPrefix
+	// TransportClassIDs lists the Transport Class IDs from the route's
+	// Transport Class Route Targets (RFC 9832 §4.3); ID 0 is Best-Effort.
+	TransportClassIDs []uint32 `json:"transport_class_ids,omitempty"`
+}
+
 // LSPrefix defines a structure of LS Prefix message
 type LSPrefix struct {
 	Key                   string                        `json:"_key,omitempty"`

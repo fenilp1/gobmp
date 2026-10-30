@@ -191,6 +191,7 @@ func (m *flowspecMockNLRI) GetNLRIMCASTVPN() (*mcastvpn.Route, error)     { retu
 func (m *flowspecMockNLRI) GetNLRIMVPN() (*mcastvpn.Route, error)         { return nil, nil }
 func (m *flowspecMockNLRI) GetNLRIRTC() (*rtc.Route, error)               { return nil, nil }
 func (m *flowspecMockNLRI) GetNLRIMUP() (*mup.Route, error)               { return nil, nil }
+func (m *flowspecMockNLRI) GetNLRICT() (*base.MPNLRI, error)              { return nil, nil }
 
 // minimalPeerHeader returns a PerPeerHeader usable in producer tests.
 func minimalPeerHeader() *bmp.PerPeerHeader {

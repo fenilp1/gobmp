@@ -47,6 +47,9 @@ func TestPublishMessageTopics(t *testing.T) {
 		{name: "combined", msgType: bmp.MUPMsg, topic: MUPMessageTopic},
 		{name: "IPv4", msgType: bmp.MUPV4Msg, topic: MUPMessageV4Topic},
 		{name: "IPv6", msgType: bmp.MUPV6Msg, topic: MUPMessageV6Topic},
+		{name: "BGP CT", msgType: bmp.ClassfulTransportMsg, topic: BGPCTMessageTopic},
+		{name: "BGP CT IPv4", msgType: bmp.ClassfulTransportV4Msg, topic: BGPCTMessageV4Topic},
+		{name: "BGP CT IPv6", msgType: bmp.ClassfulTransportV6Msg, topic: BGPCTMessageV6Topic},
 		{name: "statistics", msgType: bmp.StatsReportMsg, topic: StatsMessageTopic},
 		{name: "raw", msgType: bmp.BMPRawMsg, topic: RawMessageTopic},
 	}

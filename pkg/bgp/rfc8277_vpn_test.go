@@ -8,7 +8,8 @@ import (
 	"github.com/sbezverk/gobmp/pkg/base"
 )
 
-// RFC 8277 conformance of the L3VPN (SAFI 128) NLRI decoder.
+// RFC 8277 conformance of the VPN NLRI decoder shared by L3VPN (SAFI 128) and
+// BGP Classful Transport (SAFI 76, RFC 9832 §6.1).
 
 var vpnTestRD = []byte{0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x01} // RD 100:1
 
@@ -21,21 +22,24 @@ func vpnTestNLRI(parts ...[]byte) []byte {
 }
 
 // decodeVPN decodes nlri as MP_REACH_NLRI (withdraw false) or MP_UNREACH_NLRI
-// (withdraw true) of AFI afi SAFI 128 through GetNLRIL3VPN.
-func decodeVPN(t *testing.T, afi uint16, withdraw bool, ml base.MultiLabel, nlri []byte) (*base.MPNLRI, error) {
+// (withdraw true) of AFI afi and SAFI safi through the SAFI's getter.
+func decodeVPN(t *testing.T, afi uint16, safi uint8, withdraw bool, ml base.MultiLabel, nlri []byte) (*base.MPNLRI, error) {
 	t.Helper()
 	var mp MPNLRI
 	if withdraw {
-		mp = &MPUnReachNLRI{AddressFamilyID: afi, SubAddressFamilyID: 128, WithdrawnRoutes: nlri}
+		mp = &MPUnReachNLRI{AddressFamilyID: afi, SubAddressFamilyID: safi, WithdrawnRoutes: nlri}
 	} else {
 		mp = &MPReachNLRI{
 			AddressFamilyID:      afi,
-			SubAddressFamilyID:   128,
+			SubAddressFamilyID:   safi,
 			NextHopAddressLength: 4,
 			NextHopAddress:       []byte{192, 0, 2, 1},
 			NLRI:                 nlri,
 			MultiLabel:           ml,
 		}
+	}
+	if safi == SAFIClassfulTransport {
+		return mp.GetNLRICT()
 	}
 	return mp.GetNLRIL3VPN()
 }
@@ -226,48 +230,50 @@ func TestVPNNLRIRFC8277Conformance(t *testing.T) {
 			fail:     true,
 		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := decodeVPN(t, tt.afi, tt.withdraw, tt.ml, tt.nlri)
-			if tt.fail {
-				if err == nil {
-					t.Fatalf("decoded %+v, want a malformed NLRI error", got)
+	for _, safi := range []uint8{128, SAFIClassfulTransport} {
+		for _, tt := range tests {
+			t.Run(fmt.Sprintf("%s SAFI %d", tt.name, safi), func(t *testing.T) {
+				got, err := decodeVPN(t, tt.afi, safi, tt.withdraw, tt.ml, tt.nlri)
+				if tt.fail {
+					if err == nil {
+						t.Fatalf("decoded %+v, want a malformed NLRI error", got)
+					}
+					return
 				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if len(got.NLRI) != 1 {
-				t.Fatalf("got %d NLRIs, want 1", len(got.NLRI))
-			}
-			r := got.NLRI[0]
-			if len(r.Label) != len(tt.labels) {
-				t.Fatalf("got %d labels, want %v", len(r.Label), tt.labels)
-			}
-			for i, l := range tt.labels {
-				if r.Label[i].Value != l {
-					t.Errorf("label[%d] = %d, want %d", i, r.Label[i].Value, l)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
 				}
-			}
-			wantRD := tt.rd
-			if wantRD == "" {
-				wantRD = "100:1"
-			}
-			if r.RD.String() != wantRD {
-				t.Errorf("RD = %s, want %s", r.RD, wantRD)
-			}
-			if tt.afi == 1 && (r.Length != 32 || !net.IP(r.Prefix).Equal(net.IP(v4Prefix))) {
-				t.Errorf("prefix = %v/%d, want 10.0.0.1/32", r.Prefix, r.Length)
-			}
-			if tt.cidr != "" {
-				ip := make(net.IP, net.IPv6len)
-				copy(ip, r.Prefix)
-				if got := fmt.Sprintf("%s/%d", ip, r.Length); got != tt.cidr {
-					t.Errorf("prefix = %s, want %s", got, tt.cidr)
+				if len(got.NLRI) != 1 {
+					t.Fatalf("got %d NLRIs, want 1", len(got.NLRI))
 				}
-			}
-		})
+				r := got.NLRI[0]
+				if len(r.Label) != len(tt.labels) {
+					t.Fatalf("got %d labels, want %v", len(r.Label), tt.labels)
+				}
+				for i, l := range tt.labels {
+					if r.Label[i].Value != l {
+						t.Errorf("label[%d] = %d, want %d", i, r.Label[i].Value, l)
+					}
+				}
+				wantRD := tt.rd
+				if wantRD == "" {
+					wantRD = "100:1"
+				}
+				if r.RD.String() != wantRD {
+					t.Errorf("RD = %s, want %s", r.RD, wantRD)
+				}
+				if tt.afi == 1 && (r.Length != 32 || !net.IP(r.Prefix).Equal(net.IP(v4Prefix))) {
+					t.Errorf("prefix = %v/%d, want 10.0.0.1/32", r.Prefix, r.Length)
+				}
+				if tt.cidr != "" {
+					ip := make(net.IP, net.IPv6len)
+					copy(ip, r.Prefix)
+					if got := fmt.Sprintf("%s/%d", ip, r.Length); got != tt.cidr {
+						t.Errorf("prefix = %s, want %s", got, tt.cidr)
+					}
+				}
+			})
+		}
 	}
 }
 
@@ -283,9 +289,9 @@ func TestOpenMessageMultiLabelCapability(t *testing.T) {
 	}{
 		{name: "absent", want: map[int]bool{}},
 		{
-			name: "VPNv4 and labeled unicast v6",
-			caps: [][]byte{vpnTestNLRI(triple(1, 128, 2), triple(2, 4, 255))},
-			want: map[int]bool{NLRIMessageType(1, 128): true, NLRIMessageType(2, 4): true},
+			name: "VPNv4 and CT v6",
+			caps: [][]byte{vpnTestNLRI(triple(1, 128, 2), triple(2, 76, 255))},
+			want: map[int]bool{NLRIMessageType(1, 128): true, NLRIMessageType(2, 76): true},
 		},
 		{
 			name: "count 0 and 1 ignored",
@@ -299,7 +305,7 @@ func TestOpenMessageMultiLabelCapability(t *testing.T) {
 		},
 		{
 			name: "only first copy significant",
-			caps: [][]byte{triple(1, 128, 2), triple(1, 4, 2)},
+			caps: [][]byte{triple(1, 128, 2), triple(1, 76, 2)},
 			want: map[int]bool{NLRIMessageType(1, 128): true},
 		},
 		{name: "malformed length", caps: [][]byte{{0x00, 0x01, 0x80}}, want: map[int]bool{}},

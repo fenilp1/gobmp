@@ -190,6 +190,30 @@ func (mp *MPReachNLRI) GetNLRIL3VPN() (*base.MPNLRI, error) {
 	return nil, NewNLRINotFoundError(mp.AddressFamilyID, mp.SubAddressFamilyID, "MP_REACH_NLRI")
 }
 
+// GetNLRICT checks for BGP Classful Transport NLRI (AFI 1/2, SAFI 76, RFC 9832)
+// in MP_REACH_NLRI and decodes it. RFC 9832 §6.1 specifies the RFC 8277 §2
+// encoding with an 8-byte RD before the prefix, i.e. the VPN NLRI layout, so
+// the L3VPN decoder is reused. The SRv6 flag is not passed: per RFC 9832 §7.13
+// an SRv6 BGP CT route carries its SID in the Prefix-SID attribute with the
+// Transposition Scheme disabled, so the label field always holds MPLS labels.
+func (mp *MPReachNLRI) GetNLRICT() (*base.MPNLRI, error) {
+	if (mp.AddressFamilyID != 1 && mp.AddressFamilyID != 2) || mp.SubAddressFamilyID != SAFIClassfulTransport {
+		return nil, NewNLRINotFoundError(mp.AddressFamilyID, mp.SubAddressFamilyID, "MP_REACH_NLRI")
+	}
+	// RFC 9832 §6.2: the next hop is IPv4 (4), IPv6 with optional link-local
+	// (16, 32), VPN-IPv6 (24, 48) or VPN-IPv4 (12); any other length is an error.
+	switch mp.NextHopAddressLength {
+	case 4, 12, 16, 24, 32, 48:
+	default:
+		return nil, fmt.Errorf("invalid BGP CT next hop length %d (RFC 9832 §6.2)", mp.NextHopAddressLength)
+	}
+	return l3vpn.UnmarshalL3VPNNLRIWithOptions(mp.NLRI, l3vpn.Options{
+		PathIDs:    mp.PathIDs,
+		MultiLabel: mp.MultiLabel,
+		AFI:        mp.AddressFamilyID,
+	})
+}
+
 // GetNLRIEVPN check for presence of NLRI EVPN AFI 25 and SAFI 70 in the NLRI 14 NLRI data and if exists, instantiate EVPN object
 func (mp *MPReachNLRI) GetNLRIEVPN() (*evpn.Route, error) {
 	if mp.AddressFamilyID == 25 && mp.SubAddressFamilyID == 70 {

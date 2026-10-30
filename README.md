@@ -86,6 +86,8 @@ goBMP is a production-ready implementation of the BGP Monitoring Protocol ([RFC 
 | FlowSpec v6 | 2/133 | Flow Specification for IPv6 |
 | BGP-MUP v4 | 1/85 | Mobile User Plane for IPv4 |
 | BGP-MUP v6 | 2/85 | Mobile User Plane for IPv6 |
+| BGP CT v4 | 1/76 | BGP Classful Transport for IPv4 (RFC 9832) |
+| BGP CT v6 | 2/76 | BGP Classful Transport for IPv6 (RFC 9832) |
 
 ### Advanced Features
 
@@ -552,6 +554,9 @@ topics in this table are shown for `--split-af=true` (the default):
 | `gobmp.parsed.mup_v4` | MUP v4 routes |
 | `gobmp.parsed.mup_v6` | MUP v6 routes |
 | `gobmp.parsed.mup` | Combined MUP v4/v6 routes (when `--split-af=false`) |
+| `gobmp.parsed.bgp_ct_v4` | BGP Classful Transport v4 routes (RFC 9832) |
+| `gobmp.parsed.bgp_ct_v6` | BGP Classful Transport v6 routes (RFC 9832) |
+| `gobmp.parsed.bgp_ct` | Combined BGP CT v4/v6 routes (when `--split-af=false`) |
 | `gobmp.raw` | RAW OpenBMP binary messages (when `--bmp-raw=true`) |
 
 When `--split-af=false`, MUP IPv4 and IPv6 messages are published to
