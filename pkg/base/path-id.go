@@ -32,7 +32,8 @@ func (s PathIDState) Expected() bool {
 // A present or absent state is parsed once. Otherwise a failed parse is
 // retried, once, with the setting flipped: the expected setting first, or
 // guess when s is unknown. A result read with the setting opposite to an
-// expected one has PathIDsFlipped set. The first error is returned.
+// expected one has PathIDsFlipped set, and is kept only if plausibleFlip
+// accepts it. The first error is returned.
 func DecodeWithPathID(s PathIDState, guess bool, parse func(pathID bool) (*MPNLRI, error)) (*MPNLRI, error) {
 	switch s {
 	case PathIDPresent:
@@ -47,8 +48,32 @@ func DecodeWithPathID(s PathIDState, guess bool, parse func(pathID bool) (*MPNLR
 		return mp, nil
 	}
 	if mp, ferr := parse(!guess); ferr == nil {
-		mp.PathIDsFlipped = s != PathIDUnknown
-		return mp, nil
+		if s == PathIDUnknown {
+			return mp, nil
+		}
+		if plausibleFlip(mp, !guess) {
+			mp.PathIDsFlipped = true
+			return mp, nil
+		}
 	}
 	return nil, err
+}
+
+// plausibleFlip reports whether mp, read by the retry of an expected state
+// with Path IDs (withPathIDs) or without, looks like routes rather than a
+// malformed field: the retry turns many of those into routes. A Path ID
+// over 0x00ffffff, from prefix octets taken as one, or a Length 0 route
+// among others, from octets left over, rejects it. RFC 7911 §2 gives the
+// identifier no semantics, so this only gates a retry that no RFC defines,
+// never the parse with the expected setting.
+func plausibleFlip(mp *MPNLRI, withPathIDs bool) bool {
+	for _, r := range mp.NLRI {
+		if withPathIDs && r.PathID > 0x00ffffff {
+			return false
+		}
+		if !withPathIDs && r.Length == 0 && len(mp.NLRI) > 1 {
+			return false
+		}
+	}
+	return true
 }
