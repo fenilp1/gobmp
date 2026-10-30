@@ -104,14 +104,17 @@ func TestLUNLRIRFC8277Conformance(t *testing.T) {
 		{name: "v4 ADD-PATH prefix of 40 bits", opts: Options{PathID: true, MultiLabel: base.MultiLabelAbsent}, nlri: luNLRI(pathID, []byte{0x40, 0x00, 0x06, 0x41}, v4Host, []byte{0x00}), fail: true},
 		{name: "v6 ADD-PATH first label 0x800000", opts: Options{PathID: true, MultiLabel: base.MultiLabelAbsent, AFI: 2}, nlri: luNLRI(pathID, []byte{0x58, 0x80, 0x00, 0x00}, v6Net), labels: []uint32{0x80000}, prefix: v6Net, length: 64, pathID: 7},
 		{name: "v6 ADD-PATH withdraw compatibility 0x000640", opts: Options{PathID: true, Withdraw: true, AFI: 2}, nlri: luNLRI(pathID, []byte{0x58, 0x00, 0x06, 0x40}, v6Net), prefix: v6Net, length: 64, pathID: 7},
-		// Path IDs present with the flag unset, and absent with it set: one
-		// retry with the flag flipped.
-		{name: "v4 Path ID with flag unset", opts: Options{MultiLabel: base.MultiLabelAbsent}, nlri: luNLRI(pathID, []byte{0x38, 0x00, 0x06, 0x41}, v4Host), labels: []uint32{100}, prefix: v4Host, length: 32, pathID: 7},
-		{name: "v6 Path ID with flag unset", opts: Options{AFI: 2}, nlri: luNLRI(pathID, []byte{0x58, 0x00, 0x06, 0x41}, v6Net), labels: []uint32{100}, prefix: v6Net, length: 64, pathID: 7},
+		// Path IDs absent with the flag set: one retry without. Present with
+		// it unset: no retry, as many malformed fields read as a route once
+		// their first four octets are taken as a Path ID.
+		{name: "v4 Path ID with flag unset", opts: Options{MultiLabel: base.MultiLabelAbsent}, nlri: luNLRI(pathID, []byte{0x38, 0x00, 0x06, 0x41}, v4Host), fail: true},
+		{name: "v6 Path ID with flag unset", opts: Options{AFI: 2}, nlri: luNLRI(pathID, []byte{0x58, 0x00, 0x06, 0x41}, v6Net), fail: true},
 		{name: "v4 no Path ID with flag set", opts: Options{PathID: true, MultiLabel: base.MultiLabelAbsent}, nlri: luNLRI([]byte{0x38, 0x00, 0x06, 0x41}, v4Host), labels: []uint32{100}, prefix: v4Host, length: 32},
-		// A malformed field (the second NLRI has Length 0) reads as one route
-		// with Path ID 0x20003e81 when the retry assumes Path IDs.
-		{name: "zero Length, flag unset", nlri: zeroLength, labels: []uint32{1000}, prefix: v4Host[:3], length: 24, pathID: 0x20003e81},
+		// Malformed fields that read as one route only with Path IDs: the
+		// second NLRI has Length 0, would be Path ID 0x20003e81.
+		{name: "zero Length, flag unset", nlri: zeroLength, fail: true},
+		{name: "v4 label 396336 S=0, flag unset", nlri: []byte{0x30, 0x20, 0x56, 0x71, 0x27, 0x60, 0xc3, 0x00, 0x00, 0x00}, fail: true},
+		{name: "v6 Length 88 field of 9 octets, flag unset", opts: Options{AFI: 2}, nlri: []byte{0x58, 0xe1, 0xc1, 0x61, 0x20, 0x01, 0x0d, 0xb8, 0x6b}, fail: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

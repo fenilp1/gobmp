@@ -18,7 +18,6 @@ Message updates and major project changes should be documented here.
 - Labeled unicast (SAFI 4) announcements with label 0x800000 publish label 524288 (RFC 8277 §2.2), not none: new hashes
 - Labeled unicast withdrawals skip the Compatibility field whatever its value and publish no labels (RFC 8277 §2.4)
 - Labeled unicast IPv4 prefixes over 32 bits are dropped as malformed (RFC 8277 §2.2)
-- Labeled unicast retries a failed parse with the Path ID flag flipped either way, as L3VPN does
 
 #### Fixed
 

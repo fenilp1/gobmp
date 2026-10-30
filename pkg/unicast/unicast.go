@@ -32,7 +32,7 @@ func UnmarshalUnicastNLRI(b []byte, pathID bool) (*base.MPNLRI, error) {
 type Options struct {
 	// PathID is set when ADD-PATH is negotiated: a 4-octet Path Identifier
 	// precedes the Length field (RFC 8277 §2.2, §2.3; RFC 7911 §3). A failed
-	// parse is tried once more with it flipped.
+	// parse with it set is tried once more without.
 	PathID bool
 	// MultiLabel is the Multiple Labels Capability state; see
 	// base.DecodeLabeledNLRI.
@@ -56,8 +56,8 @@ func UnmarshalLUNLRI(b []byte, pathID bool) (*base.MPNLRI, error) {
 
 // UnmarshalLUNLRIWithOptions builds MP NLRI object from the slice of bytes of
 // an MP_REACH_NLRI or MP_UNREACH_NLRI attribute of AFI 1/2 SAFI 4, decoded per
-// RFC 8277 §2 according to opts. A failed parse is tried once more with the
-// PathID flag flipped.
+// RFC 8277 §2 according to opts. A failed parse with PathID set is tried
+// once more without.
 func UnmarshalLUNLRIWithOptions(b []byte, opts Options) (*base.MPNLRI, error) {
 	if glog.V(6) {
 		glog.Infof("MP Label Unicast NLRI Raw: %s options: %+v", tools.MessageHex(b), opts)
@@ -70,9 +70,14 @@ func UnmarshalLUNLRIWithOptions(b []byte, opts Options) (*base.MPNLRI, error) {
 	if err == nil {
 		return mp, nil
 	}
-	opts.PathID = !opts.PathID
-	if mp, ferr := parseLabelField(b, opts); ferr == nil {
-		return mp, nil
+	// As before, a field that fails with Path IDs is retried without them,
+	// but not the other way round: many malformed fields read as a route
+	// once their first four octets are taken as a Path ID.
+	if opts.PathID {
+		opts.PathID = false
+		if mp, ferr := parseLabelField(b, opts); ferr == nil {
+			return mp, nil
+		}
 	}
 	glog.Errorf("failed to reconstruct labeled unicast prefix from slice %s with error: %+v",
 		tools.MessageHex(b), err)
