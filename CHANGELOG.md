@@ -9,6 +9,7 @@ Message updates and major project changes should be documented here.
 #### Added
 
 - `vpls.DecodeLayer2InfoValue` and `vpls.Layer2Flag{S,C,R,T}`: one Layer2 Info value decoder (RFC 4761 §3.2.4, RFC 8395 §2) shared by VPLS messages and `vpls.ParseLayer2InfoExtComm`; it returns an error for a value that is not 6 octets
+- Layer2 Info Extended Community (type 0x80, sub-type 0x0a, RFC 4761 §3.2.4) is decoded: `80 0a 13 00 05 dc 00 00` reads `layer2-info=Encaps=19 T=false R=false C=false S=false MTU=1500` instead of `Subtype unknown=[ 0x13, 0x00, 0x05, 0xDC, 0x00, 0x00 ]`
 
 #### Changed
 
