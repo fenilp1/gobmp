@@ -596,7 +596,7 @@ func TestLayer2InfoExtComm_String_AllFlags(t *testing.T) {
 				SequencedDel: true,
 				MTU:          1500,
 			},
-			want: []string{"VLAN", "S", "1500"},
+			want: []string{"Ethernet Raw Mode", "S", "1500"},
 		},
 	}
 

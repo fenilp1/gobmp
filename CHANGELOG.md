@@ -4,6 +4,20 @@ Message updates and major project changes should be documented here.
 
 ## [Unreleased]
 
+### 2026-10-30
+
+#### Changed
+
+- **Breaking:** published VPLS `encap_type` strings change to the IANA names (see Fixed); consumers matching on the old strings (`Ethernet (802.3)`, `VLAN (802.1Q)`, `Ethernet VLAN (802.1Q)`, `Frame Relay DLCI` for type 1, `HDLC`) must update
+
+#### Deprecated
+
+- `vpls.EncapFrameRelayDLCI`, `EncapEthernet`, `EncapVLAN` and `EncapEthernetVLAN` (misnamed Encaps Types 1, 4, 5 and 19); use `EncapFrameRelay`, `EncapEthernetTagged`, `EncapEthernetRaw` and `EncapVPLS`
+
+#### Fixed
+
+- VPLS `encap_type` (and `vpls.EncapTypeToString`) now uses the IANA BGP Layer 2 Encapsulation Types names (RFC 6624 §7): 19 reads `VPLS` (was `Ethernet VLAN (802.1Q)`), 4 `Ethernet (VLAN) Tagged Mode` (was `Ethernet (802.3)`), 5 `Ethernet Raw Mode` (was `VLAN (802.1Q)`), 1 `Frame Relay` (was `Frame Relay DLCI`), 2 `ATM AAL5 SDU VCC transport` (was `ATM AAL5 VCC transport`), 6 `Cisco HDLC` (was `HDLC`); 15, 17, 18, 20, 21, 25 (`Frame Relay DLCI`) and 40–44 are now named instead of `Unknown (N)`
+
 ### 2026-03-01
 
 #### Added

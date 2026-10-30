@@ -63,7 +63,7 @@ func TestVPLSMessageProducer_RFC4761(t *testing.T) {
 				AttributeType: 16, // Extended Community
 				Attribute: []byte{
 					0x80, 0x0a, // Type: Layer2 Info
-					0x04,       // Encap: Ethernet
+					0x04,       // Encap: Ethernet (VLAN) Tagged Mode
 					0x01,       // Flags: C flag
 					0x05, 0xdc, // MTU: 1500
 					0x00, 0x00, // Reserved
@@ -123,8 +123,9 @@ func TestVPLSMessageProducer_RFC4761(t *testing.T) {
 	}
 
 	// Verify Layer2 Info Extended Community
-	if msg.EncapType == nil || *msg.EncapType != "Ethernet (802.3)" {
-		t.Errorf("EncapType = %v, want Ethernet (802.3)", msg.EncapType)
+	// IANA BGP Layer 2 Encapsulation Types (RFC 6624 Section 7): 4 = Ethernet (VLAN) Tagged Mode
+	if msg.EncapType == nil || *msg.EncapType != "Ethernet (VLAN) Tagged Mode" {
+		t.Errorf("EncapType = %v, want Ethernet (VLAN) Tagged Mode", msg.EncapType)
 	}
 	if msg.ControlWord == nil || *msg.ControlWord != true {
 		t.Errorf("ControlWord = %v, want true", msg.ControlWord)
@@ -175,7 +176,7 @@ func TestVPLSMessageProducer_RFC6074(t *testing.T) {
 				AttributeType: 16, // Extended Community
 				Attribute: []byte{
 					0x80, 0x0a, // Type: Layer2 Info
-					0x13,       // Encap: Ethernet VLAN (type 19)
+					0x13,       // Encap: VPLS (type 19)
 					0x00,       // Flags: none
 					0x05, 0xdc, // MTU: 1500
 					0x00, 0x00, // Reserved
@@ -211,8 +212,9 @@ func TestVPLSMessageProducer_RFC6074(t *testing.T) {
 	}
 
 	// Verify Layer2 Info
-	if msg.EncapType == nil || *msg.EncapType != "Ethernet VLAN (802.1Q)" {
-		t.Errorf("EncapType = %v, want Ethernet VLAN (802.1Q)", msg.EncapType)
+	// RFC 4761 Section 3.2.4: "The Encaps Type for VPLS is 19."
+	if msg.EncapType == nil || *msg.EncapType != "VPLS" {
+		t.Errorf("EncapType = %v, want VPLS", msg.EncapType)
 	}
 }
 

@@ -29,37 +29,49 @@ type Layer2InfoExtComm struct {
 	MTU          uint16 // Layer-2 MTU in bytes
 }
 
-// Encapsulation Type values from RFC 4761 Section 3.2.4
+// Encaps Type values from the IANA "BGP Layer 2 Encapsulation Types"
+// registry created by RFC 6624 Section 7 (initial values in Table 1 of
+// RFC 6624 Section 3). The Encaps Type for VPLS is 19 (RFC 4761 Section 3.2.4).
 const (
-	EncapFrameRelayDLCI = 1  // Frame Relay DLCI
-	EncapATMAAL5        = 2  // ATM AAL5 VCC transport
+	EncapFrameRelay     = 1  // Frame Relay
+	EncapATMAAL5        = 2  // ATM AAL5 SDU VCC transport
 	EncapATMTransparent = 3  // ATM transparent cell transport
-	EncapEthernet       = 4  // Ethernet (802.3)
-	EncapVLAN           = 5  // VLAN (802.1Q)
-	EncapHDLC           = 6  // HDLC
+	EncapEthernetTagged = 4  // Ethernet (VLAN) Tagged Mode
+	EncapEthernetRaw    = 5  // Ethernet Raw Mode
+	EncapHDLC           = 6  // Cisco HDLC
 	EncapPPP            = 7  // PPP
 	EncapSONETSDH       = 8  // SONET/SDH Circuit Emulation Service
 	EncapATMnto1VCC     = 9  // ATM n-to-one VCC cell transport
 	EncapATMnto1VPC     = 10 // ATM n-to-one VPC cell transport
 	EncapIPLayer2       = 11 // IP Layer 2 Transport
-	EncapEthernetVLAN   = 19 // Ethernet VLAN (802.1Q)
+	EncapVPLS           = 19 // VPLS
+
+	// Deprecated: despite its name this is Encaps Type 1, which IANA names
+	// "Frame Relay"; "Frame Relay DLCI" is Encaps Type 25. Use EncapFrameRelay.
+	EncapFrameRelayDLCI = EncapFrameRelay
+	// Deprecated: Encaps Type 4 is "Ethernet (VLAN) Tagged Mode"; use EncapEthernetTagged.
+	EncapEthernet = EncapEthernetTagged
+	// Deprecated: Encaps Type 5 is "Ethernet Raw Mode"; use EncapEthernetRaw.
+	EncapVLAN = EncapEthernetRaw
+	// Deprecated: Encaps Type 19 is "VPLS"; use EncapVPLS.
+	EncapEthernetVLAN = EncapVPLS
 )
 
 // EncapTypeToString returns human-readable encapsulation type
 func EncapTypeToString(encapType uint8) string {
 	switch encapType {
-	case EncapFrameRelayDLCI:
-		return "Frame Relay DLCI"
+	case EncapFrameRelay:
+		return "Frame Relay"
 	case EncapATMAAL5:
-		return "ATM AAL5 VCC transport"
+		return "ATM AAL5 SDU VCC transport"
 	case EncapATMTransparent:
 		return "ATM transparent cell transport"
-	case EncapEthernet:
-		return "Ethernet (802.3)"
-	case EncapVLAN:
-		return "VLAN (802.1Q)"
+	case EncapEthernetTagged:
+		return "Ethernet (VLAN) Tagged Mode"
+	case EncapEthernetRaw:
+		return "Ethernet Raw Mode"
 	case EncapHDLC:
-		return "HDLC"
+		return "Cisco HDLC"
 	case EncapPPP:
 		return "PPP"
 	case EncapSONETSDH:
@@ -70,8 +82,30 @@ func EncapTypeToString(encapType uint8) string {
 		return "ATM n-to-one VPC cell transport"
 	case EncapIPLayer2:
 		return "IP Layer 2 Transport"
-	case EncapEthernetVLAN:
-		return "Ethernet VLAN (802.1Q)"
+	case 15:
+		return "Frame Relay Port mode"
+	case 17:
+		return "Structure-agnostic E1 over packet"
+	case 18:
+		return "Structure-agnostic T1 (DS1) over packet"
+	case EncapVPLS:
+		return "VPLS"
+	case 20:
+		return "Structure-agnostic T3 (DS3) over packet"
+	case 21:
+		return "Nx64kbit/s Basic Service using Structure-aware"
+	case 25:
+		return "Frame Relay DLCI"
+	case 40:
+		return "Structure-agnostic E3 over packet"
+	case 41:
+		return "Octet-aligned payload for Structure-agnostic DS1 circuits"
+	case 42:
+		return "E1 Nx64kbit/s with CAS using Structure-aware"
+	case 43:
+		return "DS1 (ESF) Nx64kbit/s with CAS using Structure-aware"
+	case 44:
+		return "DS1 (SF) Nx64kbit/s with CAS using Structure-aware"
 	default:
 		return fmt.Sprintf("Unknown (%d)", encapType)
 	}

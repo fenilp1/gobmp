@@ -177,36 +177,10 @@ func (p *producer) vpls(nlri bgp.MPNLRI, op int, ph *bmp.PerPeerHeader, update *
 	return prfxs, nil
 }
 
-// getEncapTypeString returns human-readable encapsulation type string
+// getEncapTypeString returns the IANA "BGP Layer 2 Encapsulation Types" name
+// (RFC 6624 Section 7) for an Encaps Type.
 func getEncapTypeString(encapType uint8) string {
-	switch encapType {
-	case 1:
-		return "Frame Relay DLCI"
-	case 2:
-		return "ATM AAL5 VCC transport"
-	case 3:
-		return "ATM transparent cell transport"
-	case 4:
-		return "Ethernet (802.3)"
-	case 5:
-		return "VLAN (802.1Q)"
-	case 6:
-		return "HDLC"
-	case 7:
-		return "PPP"
-	case 8:
-		return "SONET/SDH Circuit Emulation Service"
-	case 9:
-		return "ATM n-to-one VCC cell transport"
-	case 10:
-		return "ATM n-to-one VPC cell transport"
-	case 11:
-		return "IP Layer 2 Transport"
-	case 19:
-		return "Ethernet VLAN (802.1Q)"
-	default:
-		return fmt.Sprintf("Unknown (%d)", encapType)
-	}
+	return vpls.EncapTypeToString(encapType)
 }
 
 // parseRouteTargetString parses Route Target Extended Community and returns string representation
