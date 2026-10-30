@@ -393,3 +393,43 @@ func TestUnmarshalLUNLRI_PrefixLengthExceeds128(t *testing.T) {
 		t.Errorf("expected error about exceeding 128 bits, got: %v", err)
 	}
 }
+
+// TestUnmarshalLUNLRIRetryDirection checks that, as before, a field that
+// fails with Path IDs is retried without them but not the other way round:
+// these malformed fields read as a route only with a Path ID.
+func TestUnmarshalLUNLRIRetryDirection(t *testing.T) {
+	for _, b := range [][]byte{
+		{0x20, 0x00, 0x3e, 0x81, 0x30, 0x00, 0x3e, 0x81, 0x0a, 0x00, 0x00},
+		{0x30, 0x20, 0x56, 0x71, 0x27, 0x60, 0xc3, 0x00, 0x00, 0x00},
+		{0x58, 0xe1, 0xc1, 0x61, 0x20, 0x01, 0x0d, 0xb8, 0x6b},
+	} {
+		if got, err := UnmarshalLUNLRI(b, false); err == nil {
+			t.Errorf("UnmarshalLUNLRI(%x, false) = %+v, want an error", b, got.NLRI)
+		}
+	}
+	// Path ID 7 then label 100 S=1 and 10.0.0.1/32, read with the flag
+	// unset; without Path IDs flagged as set, read by the retry.
+	if _, err := UnmarshalLUNLRI([]byte{0, 0, 0, 7, 0x38, 0x00, 0x06, 0x41, 10, 0, 0, 1}, false); err == nil {
+		t.Errorf("UnmarshalLUNLRI() with an unexpected Path ID succeeded, want an error")
+	}
+	got, err := UnmarshalLUNLRI([]byte{0x38, 0x00, 0x06, 0x41, 10, 0, 0, 1}, true)
+	if err != nil || len(got.NLRI) != 1 || got.NLRI[0].PathID != 0 || got.NLRI[0].Length != 32 {
+		t.Errorf("UnmarshalLUNLRI(true) = %+v, %v, want 10.0.0.1/32 read without Path ID", got, err)
+	}
+}
+
+// UnmarshalLUNLRI, which does not know whether it decodes an announcement
+// or a withdrawal, reads a 0x800000 label field as the Compatibility field
+// (RFC 8277 §2.4), as before; UnmarshalLUNLRIWithOptions reads it as label
+// 524288 on an announcement (§2.2).
+func TestUnmarshalLUNLRICompatMarker(t *testing.T) {
+	b := []byte{0x38, 0x80, 0x00, 0x00, 10, 0, 0, 1} // 10.0.0.1/32
+	got, err := UnmarshalLUNLRI(b, false)
+	if err != nil || len(got.NLRI) != 1 || got.NLRI[0].Label != nil || got.NLRI[0].Length != 32 {
+		t.Errorf("UnmarshalLUNLRI() = %+v, %v, want 10.0.0.1/32 with no label", got, err)
+	}
+	got, err = UnmarshalLUNLRIWithOptions(b, Options{AFI: 1})
+	if err != nil || len(got.NLRI) != 1 || len(got.NLRI[0].Label) != 1 || got.NLRI[0].Label[0].Value != 0x80000 {
+		t.Errorf("UnmarshalLUNLRIWithOptions() = %+v, %v, want label 524288", got, err)
+	}
+}

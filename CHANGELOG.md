@@ -8,8 +8,13 @@ Message updates and major project changes should be documented here.
 
 #### Added
 
-- `l3vpn.UnmarshalL3VPNNLRIWithOptions` decodes VPN NLRI per `l3vpn.Options`; `UnmarshalL3VPNNLRI` now wraps it
-- `unicast.UnmarshalLUNLRIWithOptions` decodes labeled unicast NLRI per `unicast.Options`; `UnmarshalLUNLRI` now wraps it
+- `l3vpn.UnmarshalL3VPNNLRIWithOptions` decodes VPN NLRI per `l3vpn.Options`; `UnmarshalL3VPNNLRI` wraps it and, not
+  knowing the direction, still reads a 0x800000 or 0x000000 label field as the Compatibility field (no label)
+- `unicast.UnmarshalLUNLRIWithOptions` decodes labeled unicast NLRI per `unicast.Options`; `UnmarshalLUNLRI` wraps it and
+  still reads a 0x800000 label field as the Compatibility field (no label)
+- `base.MultiLabel` (`MultiLabelUnknown`, `MultiLabelAbsent`, `MultiLabelConfirmed`), `base.LabelField` (`LabelStack`,
+  `SingleLabel`, `SRv6Label`, `CompatibilityField`), `base.ReadLabelField` and `base.DecodeLabeledNLRI` for RFC 8277 label
+  fields; `bgp.OpenMessage.MultiLabelCapability` (RFC 8277 §2.1) and `bgp.MPReachNLRI.MultiLabel`
 - `base.PathIDState` and state-based decoders `bgp.UnmarshalMPReachNLRIWithState`, `bgp.UnmarshalMPUnReachNLRIWithState`,
   `base.UnmarshalRoutesWithState`, `unicast.UnmarshalUnicastNLRIWithState` and `multicast.UnmarshalMulticastNLRIWithState`;
   the ADD-PATH map and bool forms are kept, and the routes decoders also take the address family
@@ -23,7 +28,6 @@ Message updates and major project changes should be documented here.
 - Labeled unicast (SAFI 4) announcements with label 0x800000 publish label 524288 (RFC 8277 §2.2), not none: new hashes
 - Labeled unicast withdrawals skip the Compatibility field whatever its value and publish no labels (RFC 8277 §2.4)
 - Labeled unicast IPv4 prefixes over 32 bits are dropped as malformed (RFC 8277 §2.2)
-- Labeled unicast retries a failed parse with the Path ID flag flipped either way, as L3VPN does
 - ADD-PATH and Multiple Labels state is kept per monitored session, so sessions sharing a BGP ID, or an IPv4 and an
   IPv4-mapped IPv6 peer, stay apart and a Peer Down removes only its own
 - Path IDs are expected per direction (RFC 7911 §5): Adj-RIB-In on peer Send and router Receive, Adj-RIB-Out the reverse,
