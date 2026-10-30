@@ -4,6 +4,12 @@ Message updates and major project changes should be documented here.
 
 ## [Unreleased]
 
+### 2026-10-30
+
+#### Fixed
+
+- SR Policy `policy_path_name` (Candidate Path Name sub-TLV 129) no longer starts with the RESERVED octet: RFC 9830 §2.4.7 puts 1 RESERVED octet before the name, so an RFC-encoded name `main` reads `"main"` instead of `"\u0000main"`
+
 ### 2026-03-01
 
 #### Added

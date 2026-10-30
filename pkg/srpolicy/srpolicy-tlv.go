@@ -53,6 +53,16 @@ const (
 	POLICYNAMESTLV = 254
 )
 
+// symbolicName returns the name carried in the value of an SR Policy
+// Candidate Path Name or SR Policy Name sub-TLV: a 1-octet RESERVED field
+// followed by the name (RFC 9830 Sections 2.4.7 and 2.4.8).
+func symbolicName(v []byte) string {
+	if len(v) < 1 {
+		return ""
+	}
+	return string(v[1:])
+}
+
 // UnmarshalSRPolicyTLV builds Link State NLRI object for SAFI 73
 func UnmarshalSRPolicyTLV(b []byte) (*TLV, error) {
 	var err error
@@ -179,7 +189,7 @@ func UnmarshalSRPolicyTLV(b []byte) (*TLV, error) {
 			if p+sl > len(b) {
 				return nil, fmt.Errorf("SR Policy pathname sub-TLV truncated at offset %d: need %d bytes, have %d", p, sl, len(b)-p)
 			}
-			tlv.PathName = string(b[p : p+sl])
+			tlv.PathName = symbolicName(b[p : p+sl])
 		default:
 			glog.Warningf("SR Policy Sub TLV %+v is not supported", st)
 			// Per RFC 9256 Section 2.4.1, sub-TLV types 128-255 use 2-byte length.

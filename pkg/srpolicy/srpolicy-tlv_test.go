@@ -543,9 +543,10 @@ func TestUnmarshalSRPolicyTLV_PathName(t *testing.T) {
 			name: "PathName 'primary-path'",
 			input: []byte{
 				0x00, 0x0F, // Tunnel Type: 15
-				0x00, 0x0F, // Length: 15 bytes (1 type + 2 len + 12 value)
+				0x00, 0x10, // Length: 16 bytes (1 type + 2 len + 13 value)
 				0x81,       // Sub-TLV Type: PathName (129)
-				0x00, 0x0C, // Length: 12 bytes (2-byte per RFC 9256 §2.4.1)
+				0x00, 0x0D, // Length: 13 bytes (2-byte per RFC 9256 §2.4.1)
+				0x00, // RESERVED (RFC 9830 §2.4.7)
 				// "primary-path"
 				0x70, 0x72, 0x69, 0x6D, 0x61, 0x72, 0x79, 0x2D, 0x70, 0x61, 0x74, 0x68,
 			},
@@ -555,9 +556,10 @@ func TestUnmarshalSRPolicyTLV_PathName(t *testing.T) {
 			name: "PathName 'backup'",
 			input: []byte{
 				0x00, 0x0F, // Tunnel Type: 15
-				0x00, 0x09, // Length: 9 bytes (1 type + 2 len + 6 value)
+				0x00, 0x0A, // Length: 10 bytes (1 type + 2 len + 7 value)
 				0x81,       // Sub-TLV Type: PathName (129)
-				0x00, 0x06, // Length: 6 bytes (2-byte per RFC 9256 §2.4.1)
+				0x00, 0x07, // Length: 7 bytes (2-byte per RFC 9256 §2.4.1)
+				0x00, // RESERVED (RFC 9830 §2.4.7)
 				// "backup"
 				0x62, 0x61, 0x63, 0x6B, 0x75, 0x70,
 			},
@@ -567,9 +569,10 @@ func TestUnmarshalSRPolicyTLV_PathName(t *testing.T) {
 			name: "PathName single char 'A'",
 			input: []byte{
 				0x00, 0x0F, // Tunnel Type: 15
-				0x00, 0x04, // Length: 4 bytes (1 type + 2 len + 1 value)
+				0x00, 0x05, // Length: 5 bytes (1 type + 2 len + 2 value)
 				0x81,       // Sub-TLV Type: PathName (129)
-				0x00, 0x01, // Length: 1 byte (2-byte per RFC 9256 §2.4.1)
+				0x00, 0x02, // Length: 2 bytes (2-byte per RFC 9256 §2.4.1)
+				0x00, // RESERVED (RFC 9830 §2.4.7)
 				0x41, // "A"
 			},
 			wantPathName: "A",
@@ -667,7 +670,7 @@ func TestUnmarshalSRPolicyTLV_MultipleSubTLVs(t *testing.T) {
 	// Preference + BSID + ENLP + Priority + PathName
 	input := []byte{
 		0x00, 0x0F, // Tunnel Type: 15
-		0x00, 0x1C, // Length: 28 bytes (PathName uses 2-byte length now)
+		0x00, 0x1D, // Length: 29 bytes (PathName uses 2-byte length now)
 
 		// Preference sub-TLV
 		0x0C,                   // Type: Preference (12)
@@ -696,7 +699,8 @@ func TestUnmarshalSRPolicyTLV_MultipleSubTLVs(t *testing.T) {
 
 		// PathName sub-TLV (2-byte length per RFC 9256 §2.4.1)
 		0x81,       // Type: PathName (129)
-		0x00, 0x04, // Length: 4 bytes
+		0x00, 0x05, // Length: 5 bytes
+		0x00,                   // RESERVED (RFC 9830 §2.4.7)
 		0x6D, 0x61, 0x69, 0x6E, // "main"
 	}
 
@@ -786,5 +790,24 @@ func TestUnmarshalSRPolicyTLV_MinimalValid(t *testing.T) {
 	}
 	if len(tlv.SegmentList) != 0 {
 		t.Errorf("Expected empty SegmentList, got %v items", len(tlv.SegmentList))
+	}
+}
+
+// TestUnmarshalSRPolicyTLV_PathNameReserved: RFC 9830 §2.4.7 Figure 17 puts
+// a 1-octet RESERVED field ahead of the Candidate Path Name; it is not part
+// of the name and its value MUST be ignored on receipt.
+func TestUnmarshalSRPolicyTLV_PathNameReserved(t *testing.T) {
+	input := []byte{
+		0x00, 0x0F, 0x00, 0x08, // Tunnel Type 15, Length 8
+		0x81, 0x00, 0x05, // Type 129, Length 5
+		0xff,                   // RESERVED, non-zero must be ignored
+		0x6D, 0x61, 0x69, 0x6E, // "main"
+	}
+	tlv, err := UnmarshalSRPolicyTLV(input)
+	if err != nil {
+		t.Fatalf("UnmarshalSRPolicyTLV() error = %v", err)
+	}
+	if tlv.PathName != "main" {
+		t.Errorf("PathName = %q, want %q", tlv.PathName, "main")
 	}
 }
