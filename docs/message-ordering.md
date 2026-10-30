@@ -52,7 +52,10 @@ with status 1 and messages not yet published are lost. The 25 s fit within the
 default 30 s Kubernetes grace period; Docker's default stop timeout is 10 s, so
 raise it to at least 30 s (`docker stop -t 30`, Compose `stop_grace_period`) or
 the container is killed before the deadline. The Kafka publisher's Stop waits
-until every buffered message is delivered or fails.
+until every buffered message is delivered or fails. The NATS publisher, which
+reconnects for as long as the server is away, publishes synchronously: each
+publish returns once JetStream acknowledges it or its wait expires, so its Stop
+has nothing to flush.
 
 Regression tests exercise actual BMP wire frames through the parser/producer
 pipeline, including announcement, withdrawal, explicit End-of-RIB and Peer Down,
