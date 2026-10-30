@@ -150,13 +150,16 @@ func TestLabeledUnicastRFC8277(t *testing.T) {
 		{name: "v4 Path ID, no Peer Up", state: noPeerUp, afi: 1, nlri: cat(pathID, []byte{0x38, 0x00, 0x06, 0x41}, v4Host)},
 		{name: "v6 Path ID, no Peer Up", state: noPeerUp, afi: 2, nlri: cat(pathID, []byte{0x58, 0x00, 0x06, 0x41}, v6Net)},
 
-		// Malformed fields that read as one route only with Path IDs, as
-		// 0x20003e81 for the zero Length one: dropped with no Peer Up, read
-		// by the retry of an expected state.
+		// Malformed fields that read as one route only with Path IDs, such as
+		// 0x20003e81 for the zero Length one: dropped with no Peer Up, which
+		// is not retried with Path IDs, and with ADD-PATH off, whose retry
+		// result is implausible (base.DecodeWithPathID).
 		{name: "v4 zero Length, no Peer Up", state: noPeerUp, afi: 1, nlri: zeroLength},
 		{name: "v4 label 396336 S=0, no Peer Up", state: noPeerUp, afi: 1, nlri: []byte{0x30, 0x20, 0x56, 0x71, 0x27, 0x60, 0xc3, 0x00, 0x00, 0x00}},
 		{name: "v6 Length 88 field of 9 octets, no Peer Up", state: noPeerUp, afi: 2, nlri: []byte{0x58, 0xe1, 0xc1, 0x61, 0x20, 0x01, 0x0d, 0xb8, 0x6b}},
-		{name: "v4 zero Length, ADD-PATH off", state: absent, afi: 1, nlri: zeroLength, labels: []uint32{1000}, prefix: "10.0.0.0", len: 24, pathID: 0x20003e81},
+		{name: "v4 zero Length, ADD-PATH off", state: absent, afi: 1, nlri: zeroLength},
+		{name: "v4 label 396336 S=0, ADD-PATH off", state: absent, afi: 1, nlri: []byte{0x30, 0x20, 0x56, 0x71, 0x27, 0x60, 0xc3, 0x00, 0x00, 0x00}},
+		{name: "v6 Length 88 field of 9 octets, ADD-PATH off", state: absent, afi: 2, nlri: []byte{0x58, 0xe1, 0xc1, 0x61, 0x20, 0x01, 0x0d, 0xb8, 0x6b}},
 		// ADD-PATH on: NLRI without Path IDs are read by the retry.
 		{name: "v4 no Path ID, ADD-PATH on", state: absent, addPath: true, afi: 1, nlri: cat([]byte{0x38, 0x00, 0x06, 0x41}, v4Host), labels: []uint32{100}, prefix: "10.0.0.1", len: 32},
 		{name: "v6 no Path ID, ADD-PATH on", state: absent, addPath: true, afi: 2, nlri: cat([]byte{0x58, 0x00, 0x06, 0x41}, v6Net), labels: []uint32{100}, prefix: "2001:db8:1::", len: 64},

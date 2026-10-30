@@ -34,6 +34,11 @@ Message updates and major project changes should be documented here.
   Loc-RIB whenever the capability is present; a failed parse is still retried with the setting flipped
 - SAFI 1/2 and the NLRI and Withdrawn Routes fields drop prefixes over 32 bits (IPv4) or 128 (IPv6) as malformed
   (RFC 4271 §4.3, RFC 7606 §5.3) instead of capping IPv4 lengths at 32
+- The retry of a negotiated Path ID setting keeps its result only if plausible, no Path ID over 0x00ffffff and no
+  Length 0 route among others (RFC 7911 §2 gives Path IDs no semantics), so it drops malformed fields such as
+  20003e81 30003e81 0a0000 rather than publishing a bogus route. With no Peer Up the retry is unguarded, as before:
+  labeled unicast only retries a field that fails with Path IDs without them, while SAFI 1/2, the NLRI fields and L3VPN
+  retry either way and may still publish such a route
 - NLRI decode errors are logged with router, peer, RIB view and AFI/SAFI, and NLRI read with the Path ID setting
   opposite to the negotiated one log a warning, at most once a minute per session and AFI/SAFI
 

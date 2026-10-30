@@ -119,7 +119,8 @@ func TestLUNLRIRFC8277Conformance(t *testing.T) {
 		// one is retried with the setting flipped.
 		{name: "zero Length, Path IDs absent", opts: Options{PathIDs: base.PathIDAbsent}, nlri: zeroLength, fail: true},
 		{name: "zero Length withdraw, Path IDs absent", opts: Options{PathIDs: base.PathIDAbsent, Withdraw: true}, nlri: zeroLength, fail: true},
-		{name: "zero Length, Path IDs expected absent", opts: Options{PathIDs: base.PathIDExpectAbsent}, nlri: zeroLength, labels: []uint32{1000}, prefix: v4Host[:3], length: 24, pathID: 0x20003e81},
+		// The retry's Path ID 0x20003e81 is implausible (base.DecodeWithPathID).
+		{name: "zero Length, Path IDs expected absent", opts: Options{PathIDs: base.PathIDExpectAbsent}, nlri: zeroLength, fail: true},
 		{name: "Path ID, Path IDs absent", opts: Options{PathIDs: base.PathIDAbsent}, nlri: luNLRI(pathID, []byte{0x38, 0x00, 0x06, 0x41}, v4Host), fail: true},
 		{name: "no Path ID, Path IDs present", opts: Options{PathIDs: base.PathIDPresent}, nlri: luNLRI([]byte{0x38, 0x00, 0x06, 0x41}, v4Host), fail: true},
 		{name: "no Path ID, Path IDs expected", opts: Options{PathIDs: base.PathIDExpectPresent}, nlri: luNLRI([]byte{0x38, 0x00, 0x06, 0x41}, v4Host), labels: []uint32{100}, prefix: v4Host, length: 32},
